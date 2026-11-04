@@ -1,6 +1,0 @@
-r
-halt
-loadfile "build\peripheral_mode.hex"
-r
-go
-exit
