@@ -11,15 +11,11 @@ Target: **PY32F002BF15P6**, TSSOP20, Cortex-M0+, 24 KB flash / 3 KB RAM.
 
 | Path | Contents |
 | --- | --- |
-| `Src/main.c` | `HAL_Init`, clock, board I/O, link, non-blocking main loop |
-| `Src/link.cpp` | CLK/DATA pins, CLK edge ISR, DATA drive timing around the protocol engine |
-| `Src/link.h` | C entry points used by the application (publish inputs, take updates) |
-| `Src/app_peripheral.c` | Glue between the register map and the board: pressure timer, publish, apply |
-| `Src/app_io.c` | Board I/O boundary (LED is real, the rest are stubs until pins are assigned) |
-| `Src/board.h` | Package pin map and every pin the firmware uses |
-| `Src/bsp/` | HAL MSP and interrupt vectors |
-| `Src/py32f002b_hal_conf.h` | Which HAL modules are built in (project config, keep local) |
-| `Src/py32f002b_it.h` | Interrupt handler prototypes (project header, keep local) |
+| `Src/main.cpp` | `HAL_Init`, clock, LED, the `peripheral` instance, the CLK interrupt handler (overrides the weak stub), non-blocking loop (`poll()` + heartbeat) |
+| `Src/Py32Peripheral.h` / `Py32Peripheral.cpp` | `class Py32Peripheral final : public Peripheral` — CLK/DATA pins, CLK edge handling, register ↔ board mapping |
+| `Src/board.h` | The only project header: HAL module selection and system values, pin map, board bring-up and interrupt prototypes |
+| `Src/board.c` | The only C file: clock tree, `HAL_MspInit`, weak defaults for every interrupt vector |
+| `Src/py32f002b_hal_conf.h` | Vendor include hook: includes `board.h` and the selected HAL module headers |
 
 Everything vendor-owned comes from git at build time — nothing is copied into
 this tree:
@@ -36,6 +32,19 @@ The only duplicated-basename trap is `Templates/PY32F002Bxx_Templates/Src`,
 which holds its own `main.c`, `py32f002b_it.c` and `py32f002b_hal_msp.c`. That
 directory is deliberately kept off the make `vpath`; `SystemInit` is built
 through its own `vendor_*.o` rule instead.
+
+### Why py32f002b_hal_conf.h still exists
+
+`py32f0xx_hal.h` includes `py32f002b_hal_conf.h` as its first include, before
+any HAL or device type exists — so that filename has to be on the include path
+and has to be able to include the module headers. Since `board.h` is already
+mid-include when an application file starts the chain, its guard would make the
+re-entry a no-op. The split is therefore:
+
+* `board.h` — module selection, oscillator/system values, assert macro, pin map,
+  prototypes (the configuration).
+* `py32f002b_hal_conf.h` — includes `board.h`, then the selected module headers
+  (the mechanism the vendor header demands).
 
 ## Build
 
@@ -58,8 +67,10 @@ Outputs in `build/`:
 
 `make clean` removes `build/`.
 
-The C++ engine is built with exceptions and RTTI disabled; the image uses
-~5.3 KB of flash and ~1.1 KB of RAM including the heap/stack reservation.
+All application code is C++; only [board.c](Src/board.c) stays C so the HAL MSP
+and the interrupt vectors keep plain C linkage. The C++ side is built with
+exceptions and RTTI disabled; the image uses ~5.2 KB of flash and ~1.1 KB of RAM
+including the heap/stack reservation.
 
 ## Flashing
 
@@ -87,21 +98,26 @@ openocd -f interface/cmsis-dap.cfg -f target/py32f002b.cfg \
 | Display, buttons, battery, pressure ADC, pump, valve | — | — | **unassigned (TBD for ZP008 rev 10)** |
 
 CLK and DATA are declared in [board.h](Src/board.h). The CLK pin number also
-selects the EXTI vector, which `Src/bsp/py32f002b_it.c` derives automatically;
-keep both pins in the 0..7 range, since the PY32F002B only implements
-`EXTICR[0..1]`.
+selects the EXTI vector, which [Py32Peripheral.cpp](Src/Py32Peripheral.cpp) and
+[board.c](Src/board.c) derive automatically; keep both pins in the 0..7 range,
+since the PY32F002B only implements `EXTICR[0..1]`.
 
-Bringing up the rest of the board only needs [app_io.c](Src/app_io.c) to be
-filled in: the link layer already publishes and applies every register.
+Bringing up the rest of the board only needs the `TODO(ZP008 rev 10)` spots in
+[Py32Peripheral.cpp](Src/Py32Peripheral.cpp) to be filled in: the class already
+publishes and applies every register.
 
 ## Bus behaviour
 
 * CLK idles low, DATA idles high (released, internal pull-up).
 * The CLK EXTI interrupt runs the whole frame engine; the main loop never
   blocks, so the controller can clock as fast as the ISR latency allows.
+* `board.c` only provides weak defaults for the vectors, so `main.cpp` owns the
+  CLK interrupt (`BOARD_LINK_CLK_IRQHandler`, i.e. the EXTI vector selected by
+  the CLK pin) together with the `Py32Peripheral` instance it serves.
 * A frame left half-transferred (controller stopped clocking for 10 ms) is
-  dropped by `Link_Task()`.
-* `Link_TakeUpdates()` reports which output registers were written, so the board
-  is only touched for values that actually changed.
+  dropped by `Py32Peripheral::poll()`.
+* `Py32Peripheral::poll()` reports which output registers were written (through
+  `takeUpdates()`), so the board is only touched for values that actually
+  changed.
 * Multi-byte registers are read and written with the CLK interrupt masked, so a
   frame can never observe a half-updated 16- or 32-bit value.

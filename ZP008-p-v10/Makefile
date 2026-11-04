@@ -46,12 +46,7 @@ endif
 ######################################
 # C sources
 C_SOURCES =  \
-Src/main.c \
-Src/app_clock.c \
-Src/app_io.c \
-Src/app_peripheral.c \
-Src/bsp/py32f002b_hal_msp.c \
-Src/bsp/py32f002b_it.c \
+Src/board.c \
 $(PUYA_HAL)/Src/py32f002b_hal.c \
 $(PUYA_HAL)/Src/py32f002b_hal_rcc.c \
 $(PUYA_HAL)/Src/py32f002b_hal_rcc_ex.c \
@@ -61,7 +56,8 @@ $(PUYA_HAL)/Src/py32f002b_hal_cortex.c
 
 # C++ sources
 CPP_SOURCES =  \
-Src/link.cpp \
+Src/main.cpp \
+Src/Py32Peripheral.cpp \
 $(BITBANG_DIR)/protocol.cpp
 
 
