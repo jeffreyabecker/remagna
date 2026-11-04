@@ -38,6 +38,9 @@
             "path": "Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_gpio.c"
           },
           {
+            "path": "Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_i2c.c"
+          },
+          {
             "path": "Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_pwr.c"
           },
           {

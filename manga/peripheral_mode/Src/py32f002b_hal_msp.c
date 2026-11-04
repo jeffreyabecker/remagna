@@ -48,4 +48,32 @@ void HAL_MspInit(void)
   __HAL_RCC_PWR_CLK_ENABLE();
 }
 
+/**
+  * @brief Initialize the I2C MSP.
+  * @param hi2c I2C handle
+  */
+void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  if (hi2c->Instance == I2C1)
+  {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_I2C_CLK_ENABLE();
+
+    /* PB6 = I2C1_SDA, PA2 = I2C1_SCL; this also releases the SWD pins. */
+    GPIO_InitStruct.Mode      = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull      = GPIO_PULLUP;
+    GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF6_I2C1;
+
+    GPIO_InitStruct.Pin = GPIO_PIN_2;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_6;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  }
+}
+
 /************************ (C) COPYRIGHT Puya *****END OF FILE******************/

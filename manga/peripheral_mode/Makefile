@@ -37,6 +37,7 @@ Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_rcc.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_rcc_ex.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_gpio.c \
+Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_i2c.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_pwr.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_cortex.c
 
