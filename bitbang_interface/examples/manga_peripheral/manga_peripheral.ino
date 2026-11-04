@@ -7,7 +7,7 @@
   * CH32V003 Arduino core. Adjust the pin defines to your board package.
   *
   * The protocol engine and register file come from the bitbang_interface
-  * library (remagna::bitbang::Peripheral). The sketch only:
+  * library (Peripheral). The sketch only:
   *   - runs onBitClocked() from the CLK interrupt and applies the DATA drive state
   *     it returns,
   *   - pushes fresh input values with the setters (buttons, battery, ADC,
@@ -29,8 +29,6 @@
 #include <Arduino.h>
 #include <array>
 #include <protocol.h>
-
-namespace rb = remagna::bitbang;
 
 // ---------------------------------------------------------------------------
 // Pin assignment (CH32V003F4P6; change to match your board)
@@ -60,13 +58,13 @@ constexpr std::uint16_t PressureThreshold = 512U;
 // Abort a partial frame if the controller stops clocking for this long.
 constexpr std::uint32_t BusIdleTimeoutUs = 10000U;
 
-rb::Peripheral peripheral;
+Peripheral peripheral;
 
 // Written by the CLK ISR, read by the main loop.
 volatile std::uint32_t lastEdgeUs = 0U;
 
 // DATA state the ISR has applied, so unchanged levels skip the pin writes.
-rb::Peripheral::Drive appliedDrive = rb::Peripheral::Drive::Release;
+Peripheral::Drive appliedDrive = Peripheral::Drive::Release;
 
 /**
   * @brief  CLK interrupt: hand the edge to the engine and drive DATA.
@@ -80,22 +78,22 @@ void onClockEdge()
 
   lastEdgeUs = micros();
 
-  const rb::Peripheral::Drive target = peripheral.onBitClocked(clockHigh, dataLevel);
+  const Peripheral::Drive target = peripheral.onBitClocked(clockHigh, dataLevel);
 
-  if ((target == rb::Peripheral::Drive::Hold) || (target == appliedDrive))
+  if ((target == Peripheral::Drive::Hold) || (target == appliedDrive))
   {
     return; // keep the current DATA state, e.g. mid read bit
   }
   appliedDrive = target;
 
-  if (target == rb::Peripheral::Drive::Release)
+  if (target == Peripheral::Drive::Release)
   {
     pinMode(PIN_DATA, INPUT_PULLUP);
     return;
   }
 
   pinMode(PIN_DATA, OUTPUT);
-  digitalWrite(PIN_DATA, target == rb::Peripheral::Drive::High ? HIGH : LOW);
+  digitalWrite(PIN_DATA, target == Peripheral::Drive::High ? HIGH : LOW);
 }
 
 std::uint32_t pressurizedMs = 0U;
@@ -103,7 +101,7 @@ std::uint32_t lastPressureSampleMs = 0U;
 
 std::uint8_t readButtons()
 {
-  return rb::protocol::build(digitalRead(PIN_BUTTON1) == LOW,
+  return build(digitalRead(PIN_BUTTON1) == LOW,
                              digitalRead(PIN_BUTTON2) == LOW,
                              digitalRead(PIN_BUTTON3) == LOW,
                              digitalRead(PIN_BUTTON4) == LOW);
@@ -137,7 +135,7 @@ void updatePressure()
 void applyPumpDuty(std::uint16_t duty)
 {
   const std::uint16_t pwm = static_cast<std::uint16_t>(
-      (static_cast<std::uint32_t>(duty) * 255U + 500U) / rb::Peripheral::PumpDutyMax);
+      (static_cast<std::uint32_t>(duty) * 255U + 500U) / PumpDutyMax);
   analogWrite(PIN_PUMP, pwm);
 }
 
@@ -155,19 +153,19 @@ void applyOutputs()
 {
   const std::uint8_t updates = peripheral.takeUpdates();
 
-  if ((updates & rb::Peripheral::UpdateDisplay) != 0U)
+  if ((updates & Peripheral::UpdateDisplay) != 0U)
   {
     // No panel is wired up in this sketch yet: read the digits here.
-    const std::array<std::uint8_t, rb::Peripheral::DisplayDigits> digits = peripheral.display();
+    const std::array<std::uint8_t, DisplayDigits> digits = peripheral.display();
     (void)digits;
   }
 
-  if ((updates & rb::Peripheral::UpdatePumpDuty) != 0U)
+  if ((updates & Peripheral::UpdatePumpDuty) != 0U)
   {
     applyPumpDuty(peripheral.pumpDuty());
   }
 
-  if ((updates & rb::Peripheral::UpdateValveState) != 0U)
+  if ((updates & Peripheral::UpdateValveState) != 0U)
   {
     digitalWrite(PIN_VALVE, peripheral.valveOpen() ? HIGH : LOW);
   }
@@ -182,7 +180,7 @@ void abortStalledFrame(std::uint32_t nowUs)
     peripheral.reset();
     interrupts();
     pinMode(PIN_DATA, INPUT_PULLUP);
-    appliedDrive = rb::Peripheral::Drive::Release;
+    appliedDrive = Peripheral::Drive::Release;
   }
 }
 

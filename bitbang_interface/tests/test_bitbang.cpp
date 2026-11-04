@@ -17,8 +17,6 @@
 
 #include "protocol.h"
 
-namespace rb = remagna::bitbang;
-
 namespace
 {
 
@@ -38,19 +36,19 @@ void check(bool condition, const char *expression, const char *file, int line)
 #define CHECK(expr) check((expr), #expr, __FILE__, __LINE__)
 #define CHECK_EQ(actual, expected) check((actual) == (expected), #actual " == " #expected, __FILE__, __LINE__)
 
-static_assert(rb::protocol::build(false, false, false, false) == 0x00U);
-static_assert(rb::protocol::build(true, false, true, false) == 0x05U);
-static_assert(rb::protocol::build(true, true, true, true) == 0x0FU);
-static_assert(rb::protocol::pressed(0x05U, 1U));
-static_assert(!rb::protocol::pressed(0x05U, 2U));
-static_assert(rb::protocol::pressed(0x05U, 3U));
-static_assert(!rb::protocol::pressed(0x05U, 0U));
-static_assert(!rb::protocol::pressed(0x05U, 5U));
+static_assert(build(false, false, false, false) == 0x00U);
+static_assert(build(true, false, true, false) == 0x05U);
+static_assert(build(true, true, true, true) == 0x0FU);
+static_assert(pressed(0x05U, 1U));
+static_assert(!pressed(0x05U, 2U));
+static_assert(pressed(0x05U, 3U));
+static_assert(!pressed(0x05U, 0U));
+static_assert(!pressed(0x05U, 5U));
 
-class LoopbackController final : public rb::Controller
+class LoopbackController final : public Controller
 {
 public:
-  explicit LoopbackController(rb::Peripheral &peripheral) : peripheral_(peripheral)
+  explicit LoopbackController(Peripheral &peripheral) : peripheral_(peripheral)
   {
   }
 
@@ -66,8 +64,8 @@ protected:
     }
 
     // Falling edge: the peripheral decides what it puts on DATA.
-    const rb::Peripheral::Drive setup = peripheral_.onBitClocked(false, false);
-    const bool deviceBit = setup == rb::Peripheral::Drive::High;
+    const Peripheral::Drive setup = peripheral_.onBitClocked(false, false);
+    const bool deviceBit = setup == Peripheral::Drive::High;
 
     // Rising edge: the peripheral samples whichever level is on the wire.
     (void)peripheral_.onBitClocked(true, drive ? txLevel : deviceBit);
@@ -81,14 +79,14 @@ protected:
   }
 
 private:
-  rb::Peripheral &peripheral_;
+  Peripheral &peripheral_;
 };
 
 namespace
 {
 
 /** Drive a write frame straight into the peripheral, bypassing the API checks. */
-void sendRawWrite(rb::Peripheral &peripheral,
+void sendRawWrite(Peripheral &peripheral,
                   std::uint8_t address,
                   const std::uint8_t *data,
                   std::uint8_t length)
@@ -111,41 +109,41 @@ void sendRawWrite(rb::Peripheral &peripheral,
   }
 }
 
-void testIdentity(rb::Controller &controller)
+void testIdentity(Controller &controller)
 {
-  CHECK_EQ(controller.deviceId(), rb::reg::DeviceIdValue);
-  CHECK_EQ(controller.mapVersion(), rb::reg::MapVersionValue);
+  CHECK_EQ(controller.deviceId(), DeviceIdValue);
+  CHECK_EQ(controller.mapVersion(), MapVersionValue);
 }
 
-void testDisplay(rb::Controller &controller, rb::Peripheral &peripheral)
+void testDisplay(Controller &controller, Peripheral &peripheral)
 {
   const auto blank = controller.display();
 
   for (const auto digit : blank)
   {
-    CHECK_EQ(digit, rb::reg::DigitBlank);
+    CHECK_EQ(digit, DigitBlank);
   }
 
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateNone));
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateNone));
 
-  const std::array<std::uint8_t, rb::Controller::DisplayDigits> expected{0U, 1U, 2U, 3U, 4U, 5U};
+  const std::array<std::uint8_t, DisplayDigits> expected{0U, 1U, 2U, 3U, 4U, 5U};
   controller.writeDisplay(expected);
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateDisplay));
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateDisplay));
   CHECK(peripheral.display() == expected);
 
   const auto readBack = controller.display();
   CHECK(readBack == expected);
 }
 
-void testInputs(rb::Controller &controller, rb::Peripheral &peripheral)
+void testInputs(Controller &controller, Peripheral &peripheral)
 {
-  peripheral.setButtons(rb::protocol::build(true, false, true, false));
+  peripheral.setButtons(build(true, false, true, false));
 
   const std::uint8_t mask = controller.buttons();
-  CHECK(rb::protocol::pressed(mask, 1U));
-  CHECK(!rb::protocol::pressed(mask, 2U));
-  CHECK(rb::protocol::pressed(mask, 3U));
-  CHECK(!rb::protocol::pressed(mask, 4U));
+  CHECK(pressed(mask, 1U));
+  CHECK(!pressed(mask, 2U));
+  CHECK(pressed(mask, 3U));
+  CHECK(!pressed(mask, 4U));
 
   peripheral.setBatteryConnected(true);
   CHECK(controller.batteryConnected());
@@ -163,50 +161,50 @@ void testInputs(rb::Controller &controller, rb::Peripheral &peripheral)
   CHECK_EQ(controller.pressurizedTimeMs(), 123456U);
 }
 
-void testPump(rb::Controller &controller, rb::Peripheral &peripheral)
+void testPump(Controller &controller, Peripheral &peripheral)
 {
   CHECK_EQ(controller.pumpDuty(), 0);
 
   CHECK(controller.writePumpDuty(750U));
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdatePumpDuty));
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdatePumpDuty));
   CHECK_EQ(peripheral.pumpDuty(), 750);
   CHECK_EQ(controller.pumpDuty(), 750);
 
-  CHECK(controller.writePumpDuty(rb::Controller::PumpDutyMax));
-  CHECK_EQ(peripheral.pumpDuty(), rb::Controller::PumpDutyMax);
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdatePumpDuty));
+  CHECK(controller.writePumpDuty(PumpDutyMax));
+  CHECK_EQ(peripheral.pumpDuty(), PumpDutyMax);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdatePumpDuty));
 
-  CHECK(!controller.writePumpDuty(static_cast<std::uint16_t>(rb::Controller::PumpDutyMax + 1U)));
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateNone));
-  CHECK_EQ(peripheral.pumpDuty(), rb::Controller::PumpDutyMax);
+  CHECK(!controller.writePumpDuty(static_cast<std::uint16_t>(PumpDutyMax + 1U)));
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateNone));
+  CHECK_EQ(peripheral.pumpDuty(), PumpDutyMax);
 
   // A raw over-limit write is clamped by the peripheral.
   const std::uint8_t over[2] = {0xFFU, 0x03U}; // 1023
-  sendRawWrite(peripheral, rb::reg::PumpDuty, over, 2U);
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdatePumpDuty));
-  CHECK_EQ(peripheral.pumpDuty(), rb::Controller::PumpDutyMax);
-  CHECK_EQ(controller.pumpDuty(), rb::Controller::PumpDutyMax);
+  sendRawWrite(peripheral, PumpDuty, over, 2U);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdatePumpDuty));
+  CHECK_EQ(peripheral.pumpDuty(), PumpDutyMax);
+  CHECK_EQ(controller.pumpDuty(), PumpDutyMax);
 }
 
-void testValve(rb::Controller &controller, rb::Peripheral &peripheral)
+void testValve(Controller &controller, Peripheral &peripheral)
 {
   CHECK(!peripheral.valveOpen());
-  CHECK(controller.valveState() == rb::ValveState::Closed);
+  CHECK(controller.valveState() == ValveState::Closed);
 
-  controller.writeValveState(rb::ValveState::Open);
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateValveState));
+  controller.writeValveState(ValveState::Open);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateValveState));
   CHECK(peripheral.valveOpen());
-  CHECK(controller.valveState() == rb::ValveState::Open);
+  CHECK(controller.valveState() == ValveState::Open);
 
-  controller.writeValveState(rb::ValveState::Closed);
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateValveState));
+  controller.writeValveState(ValveState::Closed);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateValveState));
   CHECK(!peripheral.valveOpen());
-  CHECK(controller.valveState() == rb::ValveState::Closed);
+  CHECK(controller.valveState() == ValveState::Closed);
 
   // An out-of-spec register value is not reported as a valve state.
   const std::uint8_t unknown = 7U;
-  sendRawWrite(peripheral, rb::reg::ValveState, &unknown, 1U);
-  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateValveState));
+  sendRawWrite(peripheral, ValveStateReg, &unknown, 1U);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateValveState));
   CHECK(!peripheral.valveOpen());
   CHECK(!controller.valveState().has_value());
 }
@@ -226,7 +224,7 @@ void testFrameShape(LoopbackController &controller)
   CHECK_EQ(controller.idleReleases - idleBefore, 2U);
 }
 
-void testFinalReadBitHeld(rb::Peripheral &peripheral)
+void testFinalReadBitHeld(Peripheral &peripheral)
 {
   peripheral.reset();
 
@@ -241,20 +239,20 @@ void testFinalReadBitHeld(rb::Peripheral &peripheral)
   for (int i = 0; i < 8; ++i) bit(i == 0); // address 0x01: map version
   for (int i = 0; i < 8; ++i) bit(i == 0); // length 1
 
-  CHECK(peripheral.onBitClocked(false, false) == rb::Peripheral::Drive::Release); // turnaround
+  CHECK(peripheral.onBitClocked(false, false) == Peripheral::Drive::Release); // turnaround
   (void)peripheral.onBitClocked(true, true);
 
   for (int i = 0; i < 8; ++i)
   {
-    const rb::Peripheral::Drive drive = peripheral.onBitClocked(false, false);
-    CHECK(drive != rb::Peripheral::Drive::Release); // the last bit is driven too
-    (void)peripheral.onBitClocked(true, drive == rb::Peripheral::Drive::High);
+    const Peripheral::Drive drive = peripheral.onBitClocked(false, false);
+    CHECK(drive != Peripheral::Drive::Release); // the last bit is driven too
+    (void)peripheral.onBitClocked(true, drive == Peripheral::Drive::High);
   }
 
   CHECK(peripheral.isIdle());
 }
 
-void testAbortRecovery(rb::Peripheral &peripheral, rb::Controller &controller)
+void testAbortRecovery(Peripheral &peripheral, Controller &controller)
 {
   peripheral.reset();
   (void)peripheral.onBitClocked(true, false); // START
@@ -264,14 +262,14 @@ void testAbortRecovery(rb::Peripheral &peripheral, rb::Controller &controller)
 
   peripheral.reset();
   CHECK(peripheral.isIdle());
-  CHECK_EQ(controller.mapVersion(), rb::reg::MapVersionValue);
+  CHECK_EQ(controller.mapVersion(), MapVersionValue);
 }
 
 } // namespace
 
 int main()
 {
-  rb::Peripheral peripheral;
+  Peripheral peripheral;
   LoopbackController controller(peripheral);
 
   testIdentity(controller);

@@ -3,9 +3,9 @@
   * @file    protocol.h
   * @brief   Wire definition, register map and both link engines.
   *
-  * Contents:
-  *   - reg:      register addresses and value constants
-  *   - protocol: frame constants and button helpers
+  * Contents (all global, no namespaces):
+  *   - register addresses and value constants (DeviceId, PumpDutyMax, ...)
+  *   - frame constants and button helpers (BitsPerByte, pressed(), build())
   *   - Controller / ValveState: the controller-side driver
   *   - Peripheral: the peripheral-side device model
   *
@@ -56,9 +56,6 @@
 #include <cstdint>
 #include <optional>
 
-namespace remagna::bitbang::reg
-{
-
 inline constexpr std::uint8_t DeviceId = 0x00U;
 inline constexpr std::uint8_t MapVersion = 0x01U;
 inline constexpr std::uint8_t Display = 0x02U;
@@ -67,7 +64,7 @@ inline constexpr std::uint8_t BatteryStatus = 0x09U;
 inline constexpr std::uint8_t BatteryMillivolts = 0x0AU;
 inline constexpr std::uint8_t PressureAdc = 0x0CU;
 inline constexpr std::uint8_t PumpDuty = 0x0EU;
-inline constexpr std::uint8_t ValveState = 0x10U;
+inline constexpr std::uint8_t ValveStateReg = 0x10U; // address; ValveState is the enum
 inline constexpr std::uint8_t PressurizedTimeMs = 0x11U;
 
 inline constexpr std::uint8_t MapSize = 0x15U;
@@ -89,11 +86,6 @@ inline constexpr std::uint16_t PumpDutyMax = 1000U;
 
 inline constexpr std::uint8_t ValveClosed = 0x00U;
 inline constexpr std::uint8_t ValveOpen = 0x01U;
-
-} // namespace remagna::bitbang::reg
-
-namespace remagna::bitbang::protocol
-{
 
 inline constexpr std::uint8_t BitsPerByte = 8U;
 
@@ -119,21 +111,16 @@ inline constexpr bool pressed(std::uint8_t state, std::uint8_t index) noexcept
   */
 inline constexpr std::uint8_t build(bool button1, bool button2, bool button3, bool button4) noexcept
 {
-  return static_cast<std::uint8_t>((button1 ? reg::Button1 : 0U) |
-                                   (button2 ? reg::Button2 : 0U) |
-                                   (button3 ? reg::Button3 : 0U) |
-                                   (button4 ? reg::Button4 : 0U));
+  return static_cast<std::uint8_t>((button1 ? Button1 : 0U) |
+                                   (button2 ? Button2 : 0U) |
+                                   (button3 ? Button3 : 0U) |
+                                   (button4 ? Button4 : 0U));
 }
-
-} // namespace remagna::bitbang::protocol
-
-namespace remagna::bitbang
-{
 
 enum class ValveState : std::uint8_t
 {
-  Closed = reg::ValveClosed,
-  Open = reg::ValveOpen,
+  Closed = ValveClosed,
+  Open = ValveOpen,
 };
 
 /**
@@ -149,9 +136,6 @@ enum class ValveState : std::uint8_t
 class Controller
 {
 public:
-  static constexpr std::size_t DisplayDigits = reg::DisplayDigits;
-  static constexpr std::uint16_t PumpDutyMax = reg::PumpDutyMax;
-
   Controller() = default;
   virtual ~Controller() = default;
 
@@ -161,7 +145,7 @@ public:
   std::uint8_t deviceId();
   std::uint8_t mapVersion();
 
-  /** Digit values: 0x00..0x0F show 0..F, reg::DigitBlank blanks a digit. */
+  /** Digit values: 0x00..0x0F show 0..F, DigitBlank blanks a digit. */
   std::array<std::uint8_t, DisplayDigits> display();
   void writeDisplay(const std::array<std::uint8_t, DisplayDigits> &digits);
 
@@ -227,9 +211,6 @@ private:
 class Peripheral
 {
 public:
-  static constexpr std::size_t DisplayDigits = reg::DisplayDigits;
-  static constexpr std::uint16_t PumpDutyMax = reg::PumpDutyMax;
-
   /** What the sketch should do with DATA after a clock edge. */
   enum class Drive : std::uint8_t
   {
@@ -288,7 +269,7 @@ public:
 
   // --- Outputs: values the controller wrote --------------------------------
 
-  /** Digit values: 0x00..0x0F show 0..F, reg::DigitBlank blanks a digit. */
+  /** Digit values: 0x00..0x0F show 0..F, DigitBlank blanks a digit. */
   std::array<std::uint8_t, DisplayDigits> display() const;
 
   /** Duty in tenths of a percent, clamped to PumpDutyMax. */
@@ -319,7 +300,7 @@ private:
   void writeRegister16(std::uint8_t address, std::uint16_t value);
   void writeRegister32(std::uint8_t address, std::uint32_t value);
 
-  volatile std::uint8_t registers_[reg::MapSize];
+  volatile std::uint8_t registers_[MapSize];
   volatile std::uint8_t updates_;
   volatile Phase phase_;
   std::uint8_t bitIndex_;
@@ -333,7 +314,5 @@ private:
   std::uint8_t writeLength_;
   bool reading_;
 };
-
-} // namespace remagna::bitbang
 
 #endif // REMAGNA_BITBANG_PROTOCOL_H

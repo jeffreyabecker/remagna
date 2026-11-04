@@ -8,7 +8,7 @@
   * before opening it in the Arduino IDE.
   *
   * Roles:
-  *   controller device (this sketch) - runs bitbang::Controller and sends commands
+  *   controller device (this sketch) - runs Controller and sends commands
   *   peripheral device               - has the pump, sensor, buttons, valve and
   *                                     screen; implements the slave side
   *
@@ -23,10 +23,6 @@
   */
 
 #include <protocol.h>
-
-using remagna::bitbang::Controller;
-using remagna::bitbang::ValveState;
-using remagna::bitbang::protocol::pressed;
 
 /**
   * @brief  Platform side of the contract: clock exactly one bit.
