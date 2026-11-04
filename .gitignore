@@ -1,0 +1,43 @@
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*~
+*.bak
+
+# Build output (Keil MDK, IAR EWARM, GCC, CMake)
+Output/
+Objects/
+Listings/
+DebugConfig/
+RTE/
+Debug/
+Release/
+build/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Build artifacts
+*.o
+*.obj
+*.d
+*.elf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.crf
+*.dep
+*.lnp
+*.iex
+*.sct
+*.uvguix.*
+JLinkLog.txt
+JLinkSettings.ini
