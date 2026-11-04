@@ -26,6 +26,20 @@ BUILD_DIR = build
 # Portable protocol engine shared with the controller side (protocol.cpp)
 BITBANG_DIR = ../bitbang_interface/src
 
+# CMSIS, HAL, startup, linker script and SystemInit come from the Puya
+# submodule inside this project instead of a local copy:
+#   git submodule update --init ZP008-p-v10/PY32F002B_Firmware
+# Only the project files stay in this tree (Src/, incl. the HAL configuration
+# and interrupt header the HAL expects next to the application).
+PUYA_DIR   = PY32F002B_Firmware
+PUYA_TMPL  = $(PUYA_DIR)/Templates/PY32F002Bxx_Templates
+PUYA_HAL   = $(PUYA_DIR)/Drivers/PY32F002B_HAL_Driver
+PUYA_CMSIS = $(PUYA_DIR)/Drivers/CMSIS
+
+ifeq ($(wildcard $(PUYA_TMPL)/EIDE/startup_py32f002bxx.s),)
+$(error $(PUYA_DIR) submodule is missing: run 'git submodule update --init ZP008-p-v10/PY32F002B_Firmware' from the repo root)
+endif
+
 
 ######################################
 # source
@@ -38,13 +52,12 @@ Src/app_io.c \
 Src/app_peripheral.c \
 Src/bsp/py32f002b_hal_msp.c \
 Src/bsp/py32f002b_it.c \
-Src/bsp/system_py32f002b.c \
-Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal.c \
-Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_rcc.c \
-Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_rcc_ex.c \
-Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_gpio.c \
-Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_pwr.c \
-Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_cortex.c
+$(PUYA_HAL)/Src/py32f002b_hal.c \
+$(PUYA_HAL)/Src/py32f002b_hal_rcc.c \
+$(PUYA_HAL)/Src/py32f002b_hal_rcc_ex.c \
+$(PUYA_HAL)/Src/py32f002b_hal_gpio.c \
+$(PUYA_HAL)/Src/py32f002b_hal_pwr.c \
+$(PUYA_HAL)/Src/py32f002b_hal_cortex.c
 
 # C++ sources
 CPP_SOURCES =  \
@@ -54,7 +67,14 @@ $(BITBANG_DIR)/protocol.cpp
 
 # ASM sources
 ASM_SOURCES =  \
-startup_py32f002bxx.s
+$(PUYA_TMPL)/EIDE/startup_py32f002bxx.s
+
+# Vendor sources that cannot go through the object-per-file-name rules below.
+# The template Src directory also holds a main.c, py32f002b_it.c and
+# py32f002b_hal_msp.c; keeping it off the vpath stops those from silently
+# shadowing the project files of the same name.
+VENDOR_SOURCES =  \
+$(PUYA_TMPL)/Src/system_py32f002b.c
 
 
 #######################################
@@ -111,9 +131,9 @@ AS_INCLUDES =
 C_INCLUDES =  \
 -ISrc \
 -I$(BITBANG_DIR) \
--IDrivers/PY32F002B_HAL_Driver/Inc \
--IDrivers/CMSIS/Device/PY32F0xx/Include \
--IDrivers/CMSIS/Include
+-I$(PUYA_HAL)/Inc \
+-I$(PUYA_CMSIS)/Device/PY32F0xx/Include \
+-I$(PUYA_CMSIS)/Include
 
 
 # compile gcc flags
@@ -144,7 +164,7 @@ CXXFLAGS += -MMD -MP -MF"$(@:%.o=%.d)"
 # LDFLAGS
 #######################################
 # link script
-LDSCRIPT = py32f002bx5.ld
+LDSCRIPT = $(PUYA_TMPL)/EIDE/py32f002bx5.ld
 
 # libraries
 LIBS = -lstdc++ -lc -lm -lnosys
@@ -167,6 +187,9 @@ vpath %.cpp $(sort $(dir $(CPP_SOURCES)))
 # list of ASM program objects
 OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ASM_SOURCES:.s=.o)))
 vpath %.s $(sort $(dir $(ASM_SOURCES)))
+# list of vendor objects: prefixed so they never collide with project objects
+VENDOR_OBJECTS = $(addprefix $(BUILD_DIR)/vendor_,$(notdir $(VENDOR_SOURCES:.c=.o)))
+OBJECTS += $(VENDOR_OBJECTS)
 
 $(BUILD_DIR)/%.o: %.c Makefile | $(BUILD_DIR)
 	$(CC) -c $(CFLAGS) -Wa,-a,-ad,-alms=$(BUILD_DIR)/$(notdir $(<:.c=.lst)) $< -o $@
@@ -176,6 +199,9 @@ $(BUILD_DIR)/%.o: %.cpp Makefile | $(BUILD_DIR)
 
 $(BUILD_DIR)/%.o: %.s Makefile | $(BUILD_DIR)
 	$(AS) -c $(CFLAGS) $< -o $@
+
+$(VENDOR_OBJECTS): $(BUILD_DIR)/vendor_%.o: $(PUYA_TMPL)/Src/%.c Makefile | $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) -Wa,-a,-ad,-alms=$(BUILD_DIR)/$(notdir $(<:.c=.lst)) $< -o $@
 
 $(BUILD_DIR)/$(TARGET).elf: $(OBJECTS) Makefile
 	$(CC) $(OBJECTS) $(LDFLAGS) -o $@

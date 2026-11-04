@@ -17,18 +17,32 @@ Target: **PY32F002BF15P6**, TSSOP20, Cortex-M0+, 24 KB flash / 3 KB RAM.
 | `Src/app_peripheral.c` | Glue between the register map and the board: pressure timer, publish, apply |
 | `Src/app_io.c` | Board I/O boundary (LED is real, the rest are stubs until pins are assigned) |
 | `Src/board.h` | Package pin map and every pin the firmware uses |
-| `Src/bsp/` | HAL MSP, interrupt vectors, `SystemInit` |
-| `Drivers/` | Puya CMSIS + HAL subset (only the modules listed in the Makefile are built) |
+| `Src/bsp/` | HAL MSP and interrupt vectors |
+| `Src/py32f002b_hal_conf.h` | Which HAL modules are built in (project config, keep local) |
+| `Src/py32f002b_it.h` | Interrupt handler prototypes (project header, keep local) |
 
-The protocol engine is **not** copied here: `Src/link.cpp` compiles
-[`protocol.cpp`](../bitbang_interface/src/protocol.cpp) straight from the shared
-`bitbang_interface` library, so the peripheral and the controller always share
-one definition of the frame format and the register map
-(see [protocol.h](../bitbang_interface/src/protocol.h)).
+Everything vendor-owned comes from git at build time — nothing is copied into
+this tree:
+
+* `PY32F002B_Firmware/` (submodule) — CMSIS, the HAL sources, `SystemInit`, the
+  `startup_py32f002bxx.s` startup file and the `py32f002bx5.ld` linker script
+  (all from `Templates/PY32F002Bxx_Templates/` and `Drivers/`).
+* `../bitbang_interface` — the protocol engine behind
+  [`protocol.cpp`](../bitbang_interface/src/protocol.cpp), so the peripheral and
+  the controller always share one definition of the frame format and the
+  register map (see [protocol.h](../bitbang_interface/src/protocol.h)).
+
+The only duplicated-basename trap is `Templates/PY32F002Bxx_Templates/Src`,
+which holds its own `main.c`, `py32f002b_it.c` and `py32f002b_hal_msp.c`. That
+directory is deliberately kept off the make `vpath`; `SystemInit` is built
+through its own `vendor_*.o` rule instead.
 
 ## Build
 
 ```sh
+# once, if the submodule is not checked out yet (run from the repo root)
+git submodule update --init ZP008-p-v10/PY32F002B_Firmware
+
 # arm-none-eabi-gcc must be on PATH, or point GCC_PATH at its bin directory
 make
 # or
