@@ -13,7 +13,7 @@
   *
   *   0x00  DEVICE_ID          R    ASCII 'M'
   *   0x01  MAP_VERSION        R    register map version
-  *   0x02  DISPLAY_DIGIT1     R/W  digit value, see I2C_DEV_DIGIT_BLANK
+  *   0x02  DISPLAY_DIGIT1     R/W  digit value, 0x00..0x0F = 0..F, 0x10 = blank
   *   0x03  DISPLAY_DIGIT2     R/W
   *   0x04  DISPLAY_DIGIT3     R/W
   *   0x05  DISPLAY_DIGIT4     R/W
@@ -43,6 +43,8 @@ extern "C" {
 #include <stdint.h>
 
 /* Exported constants --------------------------------------------------------*/
+#define I2C_DEV_ADDRESS_7BIT       (0x17U)
+
 #define I2C_DEV_REG_DEVICE_ID      (0x00U)
 #define I2C_DEV_REG_MAP_VERSION    (0x01U)
 #define I2C_DEV_REG_DISPLAY_FIRST  (0x02U)
@@ -60,8 +62,6 @@ extern "C" {
 
 #define I2C_DEV_DEVICE_ID          (0x4DU) /* ASCII 'M' */
 #define I2C_DEV_MAP_VERSION        (0x01U)
-
-#define I2C_DEV_DIGIT_BLANK        (0x10U) /* 0x00..0x0F show 0..F, 0x10 blanks */
 
 #define I2C_DEV_MOTOR_DUTY_MAX     (1000U)
 

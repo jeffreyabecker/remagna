@@ -29,10 +29,13 @@ BUILD_DIR = build
 # C sources
 C_SOURCES =  \
 Src/main.c \
+Src/app_clock.c \
+Src/app_io.c \
+Src/app_swd.c \
 Src/i2c_device.c \
-Src/py32f002b_hal_msp.c \
-Src/py32f002b_it.c \
-Src/system_py32f002b.c \
+Src/bsp/py32f002b_hal_msp.c \
+Src/bsp/py32f002b_it.c \
+Src/bsp/system_py32f002b.c \
 Drivers/BSP/PY32F002Bxx_Start_Kit/py32f002bxx_Start_Kit.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal.c \
 Drivers/PY32F002B_HAL_Driver/Src/py32f002b_hal_rcc.c \
@@ -103,7 +106,7 @@ AS_INCLUDES =
 
 # C includes
 C_INCLUDES =  \
--IInc \
+-ISrc \
 -IDrivers/BSP/PY32F002Bxx_Start_Kit \
 -IDrivers/PY32F002B_HAL_Driver/Inc \
 -IDrivers/CMSIS/Device/PY32F0xx/Include \

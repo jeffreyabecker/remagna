@@ -7,22 +7,21 @@
   * the HAL listen state machine, because a register map needs variable-length
   * transfers and a repeated start without losing the register pointer.
   * HAL is only used to configure the peripheral (clock, timing, own address).
-  *
-  * The hardware access functions at the bottom of this file are stubs.
+  * Hardware access is delegated to the APP_IO_* functions in app_io.c.
   ******************************************************************************
   */
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c_device.h"
+#include "app_io.h"
 
 /* Private define ------------------------------------------------------------*/
-#define I2C_DEV_DISPLAY_DIGITS (6U)
-#define I2C_DEV_BUTTON_MASK    (0x0FU)
-#define I2C_DEV_BATTERY_BIT    (0x01U)
+#define I2C_DEV_BUTTON_MASK  (0x0FU)
+#define I2C_DEV_BATTERY_BIT  (0x01U)
 
 /* Private variables ---------------------------------------------------------*/
-static uint8_t display_digits[I2C_DEV_DISPLAY_DIGITS];
+static uint8_t display_digits[APP_IO_DISPLAY_DIGITS];
 static uint16_t motor_duty;
 static uint8_t valve_state;
 
@@ -47,14 +46,6 @@ static void I2C_Device_SnapshotInputs(void);
 static void I2C_Device_Commit(void);
 static uint8_t I2C_Device_NextRegister(uint8_t reg);
 
-static void I2C_DEV_DisplayApply(const uint8_t digits[I2C_DEV_DISPLAY_DIGITS]);
-static uint8_t I2C_DEV_ReadButtons(void);
-static uint8_t I2C_DEV_ReadBatteryConnected(void);
-static uint16_t I2C_DEV_ReadBatteryMillivolts(void);
-static uint16_t I2C_DEV_ReadPressureAdc(void);
-static void I2C_DEV_ApplyMotorDuty(uint16_t duty);
-static void I2C_DEV_ApplyValveState(uint8_t state);
-
 /**
   * @brief  Enable the register map on I2C1.
   * @note   Call after HAL_I2C_Init().
@@ -63,9 +54,9 @@ static void I2C_DEV_ApplyValveState(uint8_t state);
   */
 void I2C_Device_Init(void)
 {
-  for (uint8_t i = 0U; i < I2C_DEV_DISPLAY_DIGITS; i++)
+  for (uint8_t i = 0U; i < APP_IO_DISPLAY_DIGITS; i++)
   {
-    display_digits[i] = I2C_DEV_DIGIT_BLANK;
+    display_digits[i] = APP_IO_DIGIT_BLANK;
   }
 
   register_pointer = 0U;
@@ -164,7 +155,7 @@ void I2C_Device_IRQHandler(void)
 static uint8_t I2C_Device_ReadRegister(uint8_t reg)
 {
   if ((reg >= I2C_DEV_REG_DISPLAY_FIRST) &&
-      (reg < (I2C_DEV_REG_DISPLAY_FIRST + I2C_DEV_DISPLAY_DIGITS)))
+      (reg < (I2C_DEV_REG_DISPLAY_FIRST + APP_IO_DISPLAY_DIGITS)))
   {
     return display_digits[reg - I2C_DEV_REG_DISPLAY_FIRST];
   }
@@ -208,9 +199,9 @@ static uint8_t I2C_Device_ReadRegister(uint8_t reg)
 static void I2C_Device_WriteRegister(uint8_t reg, uint8_t value)
 {
   if ((reg >= I2C_DEV_REG_DISPLAY_FIRST) &&
-      (reg < (I2C_DEV_REG_DISPLAY_FIRST + I2C_DEV_DISPLAY_DIGITS)))
+      (reg < (I2C_DEV_REG_DISPLAY_FIRST + APP_IO_DISPLAY_DIGITS)))
   {
-    if (value <= I2C_DEV_DIGIT_BLANK)
+    if (value <= APP_IO_DIGIT_BLANK)
     {
       display_digits[reg - I2C_DEV_REG_DISPLAY_FIRST] = value;
       display_dirty = 1U;
@@ -256,10 +247,10 @@ static void I2C_Device_WriteRegister(uint8_t reg, uint8_t value)
   */
 static void I2C_Device_SnapshotInputs(void)
 {
-  buttons = (uint8_t)(I2C_DEV_ReadButtons() & I2C_DEV_BUTTON_MASK);
-  battery_status = (uint8_t)((I2C_DEV_ReadBatteryConnected() != 0U) ? I2C_DEV_BATTERY_BIT : 0U);
-  battery_millivolts = I2C_DEV_ReadBatteryMillivolts();
-  pressure_adc = I2C_DEV_ReadPressureAdc();
+  buttons = (uint8_t)(APP_IO_ReadButtons() & I2C_DEV_BUTTON_MASK);
+  battery_status = (uint8_t)((APP_IO_ReadBatteryConnected() != 0U) ? I2C_DEV_BATTERY_BIT : 0U);
+  battery_millivolts = APP_IO_ReadBatteryMillivolts();
+  pressure_adc = APP_IO_ReadPressureAdc();
 }
 
 /**
@@ -273,17 +264,17 @@ static void I2C_Device_Commit(void)
   if (display_dirty != 0U)
   {
     display_dirty = 0U;
-    I2C_DEV_DisplayApply(display_digits);
+    APP_IO_DisplayWrite(display_digits);
   }
   if (motor_dirty != 0U)
   {
     motor_dirty = 0U;
-    I2C_DEV_ApplyMotorDuty(motor_duty);
+    APP_IO_ApplyMotorDuty(motor_duty);
   }
   if (valve_dirty != 0U)
   {
     valve_dirty = 0U;
-    I2C_DEV_ApplyValveState(valve_state);
+    APP_IO_ApplyValveState(valve_state);
   }
 }
 
@@ -296,84 +287,6 @@ static uint8_t I2C_Device_NextRegister(uint8_t reg)
 {
   reg++;
   return (reg >= I2C_DEV_REG_COUNT) ? 0U : reg;
-}
-
-/* ---------------------------------------------------------------------------
- * Hardware access stubs
- *
- * Replace the bodies below with the real display, button, battery, pressure,
- * motor and valve code. These run from interrupt context except for the
- * display/motor/valve apply functions, which run from I2C_Device_Commit().
- * ------------------------------------------------------------------------- */
-
-/**
-  * @brief  Show six digits on the 7-segment display.
-  * @param  digits Digit values, 0x00..0x0F for 0..F and 0x10 for blank
-  */
-static void I2C_DEV_DisplayApply(const uint8_t digits[I2C_DEV_DISPLAY_DIGITS])
-{
-  (void)digits;
-  /* TODO: convert the digits to segment patterns and refresh the display. */
-}
-
-/**
-  * @brief  Read the four buttons.
-  * @retval bit0..3 for button 1..4, 1 = pressed
-  */
-static uint8_t I2C_DEV_ReadButtons(void)
-{
-  /* TODO: sample the button inputs. */
-  return 0U;
-}
-
-/**
-  * @brief  Report whether a battery is connected.
-  * @retval 1 when connected, 0 otherwise
-  */
-static uint8_t I2C_DEV_ReadBatteryConnected(void)
-{
-  /* TODO: sample the battery-detect input. */
-  return 0U;
-}
-
-/**
-  * @brief  Measure the battery voltage.
-  * @retval Battery voltage in millivolts
-  */
-static uint16_t I2C_DEV_ReadBatteryMillivolts(void)
-{
-  /* TODO: measure the battery voltage. */
-  return 0U;
-}
-
-/**
-  * @brief  Read the pressure sensor through the ADC.
-  * @retval Raw ADC counts
-  */
-static uint16_t I2C_DEV_ReadPressureAdc(void)
-{
-  /* TODO: start a conversion and return the raw ADC value. */
-  return 0U;
-}
-
-/**
-  * @brief  Apply the motor duty cycle.
-  * @param  duty 0..1000, corresponding to 0.0..100.0 %
-  */
-static void I2C_DEV_ApplyMotorDuty(uint16_t duty)
-{
-  (void)duty;
-  /* TODO: update the motor PWM compare value. */
-}
-
-/**
-  * @brief  Drive the valve.
-  * @param  state 0 = closed, 1 = open
-  */
-static void I2C_DEV_ApplyValveState(uint8_t state)
-{
-  (void)state;
-  /* TODO: drive the valve output. */
 }
 
 /************************ (C) COPYRIGHT Puya *****END OF FILE******************/
