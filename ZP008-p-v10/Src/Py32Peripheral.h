@@ -48,7 +48,7 @@ private:
   void publishInputs();
   void applyOutputs();
 
-  void displayWrite(const std::array<std::uint8_t, DisplayDigits> &digits);
+  void displayWrite(const char digits[DisplayDigits]);
   std::array<bool, ButtonCount> readButtons();
   bool batteryConnected();
   std::uint16_t batteryMillivolts();

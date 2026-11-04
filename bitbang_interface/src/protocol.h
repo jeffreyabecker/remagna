@@ -51,8 +51,6 @@
 #ifndef REMAGNA_BITBANG_PROTOCOL_H
 #define REMAGNA_BITBANG_PROTOCOL_H
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -146,8 +144,8 @@ public:
   std::uint8_t mapVersion();
 
   /** Digit values: 0x00..0x0F show 0..F, DigitBlank blanks a digit. */
-  std::array<std::uint8_t, DisplayDigits> display();
-  void writeDisplay(const std::array<std::uint8_t, DisplayDigits> &digits);
+  void display(char digits[DisplayDigits]);
+  void writeDisplay(const char digits[DisplayDigits]);
 
   /** bit0..3 = button 1..4, 1 = pressed. */
   std::uint8_t buttons();
@@ -270,7 +268,7 @@ public:
   // --- Outputs: values the controller wrote --------------------------------
 
   /** Digit values: 0x00..0x0F show 0..F, DigitBlank blanks a digit. */
-  std::array<std::uint8_t, DisplayDigits> display() const;
+  void display(char digits[DisplayDigits]) const;
 
   /** Duty in tenths of a percent, clamped to PumpDutyMax. */
   std::uint16_t pumpDuty() const;

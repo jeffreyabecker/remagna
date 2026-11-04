@@ -98,16 +98,16 @@ std::uint8_t Controller::mapVersion()
   return version;
 }
 
-std::array<std::uint8_t, DisplayDigits> Controller::display()
+void Controller::display(char digits[DisplayDigits])
 {
-  std::array<std::uint8_t, DisplayDigits> digits{};
-  readRegister(Display, digits.data(), static_cast<std::uint8_t>(DisplayDigits));
-  return digits;
+  readRegister(Display, reinterpret_cast<std::uint8_t *>(digits),
+               static_cast<std::uint8_t>(DisplayDigits));
 }
 
-void Controller::writeDisplay(const std::array<std::uint8_t, DisplayDigits> &digits)
+void Controller::writeDisplay(const char digits[DisplayDigits])
 {
-  writeRegister(Display, digits.data(), static_cast<std::uint8_t>(DisplayDigits));
+  writeRegister(Display, reinterpret_cast<const std::uint8_t *>(digits),
+                static_cast<std::uint8_t>(DisplayDigits));
 }
 
 std::uint8_t Controller::buttons()
@@ -440,16 +440,12 @@ void Peripheral::setPressurizedTimeMs(std::uint32_t milliseconds)
   writeRegister32(PressurizedTimeMs, milliseconds);
 }
 
-std::array<std::uint8_t, DisplayDigits> Peripheral::display() const
+void Peripheral::display(char digits[DisplayDigits]) const
 {
-  std::array<std::uint8_t, DisplayDigits> digits{};
-
-  for (std::size_t i = 0U; i < DisplayDigits; ++i)
+  for (std::uint8_t i = 0U; i < DisplayDigits; ++i)
   {
-    digits[i] = readRegister(static_cast<std::uint8_t>(Display + i));
+    digits[i] = static_cast<char>(readRegister(static_cast<std::uint8_t>(Display + i)));
   }
-
-  return digits;
 }
 
 std::uint16_t Peripheral::pumpDuty() const

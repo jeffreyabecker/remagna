@@ -189,10 +189,10 @@ void Py32Peripheral::applyOutputs()
 
   if ((updates & UpdateDisplay) != 0U)
   {
-    std::array<std::uint8_t, DisplayDigits> digits = {};
+    char digits[DisplayDigits] = {};
     {
       const IrqGuard guard;
-      digits = display();
+      display(digits);
     }
     displayWrite(digits);
   }
@@ -232,7 +232,7 @@ void Py32Peripheral::driveData(bool high)
       (BOARD_LINK_DATA_PORT->MODER & ~DataModeMask) | (0x1U << DataShift);
 }
 
-void Py32Peripheral::displayWrite(const std::array<std::uint8_t, DisplayDigits> &digits)
+void Py32Peripheral::displayWrite(const char digits[DisplayDigits])
 {
   (void)digits;
   /* TODO(ZP008 rev 10): convert the digits to segment patterns and refresh the

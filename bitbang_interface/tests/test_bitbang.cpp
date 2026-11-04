@@ -11,7 +11,6 @@
   ******************************************************************************
   */
 
-#include <array>
 #include <cstdint>
 #include <iostream>
 
@@ -21,6 +20,18 @@ namespace
 {
 
 int failures = 0;
+
+bool sameDigits(const char *actual, const char *expected)
+{
+  for (std::uint8_t i = 0U; i < DisplayDigits; ++i)
+  {
+    if (actual[i] != expected[i])
+    {
+      return false;
+    }
+  }
+  return true;
+}
 
 void check(bool condition, const char *expression, const char *file, int line)
 {
@@ -117,22 +128,27 @@ void testIdentity(Controller &controller)
 
 void testDisplay(Controller &controller, Peripheral &peripheral)
 {
-  const auto blank = controller.display();
+  char blank[DisplayDigits];
+  controller.display(blank);
 
-  for (const auto digit : blank)
+  for (const char digit : blank)
   {
-    CHECK_EQ(digit, DigitBlank);
+    CHECK_EQ(digit, static_cast<char>(DigitBlank));
   }
 
   CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateNone));
 
-  const std::array<std::uint8_t, DisplayDigits> expected{0U, 1U, 2U, 3U, 4U, 5U};
+  const char expected[DisplayDigits] = {0, 1, 2, 3, 4, 5};
   controller.writeDisplay(expected);
   CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(Peripheral::UpdateDisplay));
-  CHECK(peripheral.display() == expected);
 
-  const auto readBack = controller.display();
-  CHECK(readBack == expected);
+  char fromPeripheral[DisplayDigits];
+  peripheral.display(fromPeripheral);
+  CHECK(sameDigits(fromPeripheral, expected));
+
+  char readBack[DisplayDigits];
+  controller.display(readBack);
+  CHECK(sameDigits(readBack, expected));
 }
 
 void testInputs(Controller &controller, Peripheral &peripheral)
