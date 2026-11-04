@@ -30,6 +30,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "i2c_device.h"
 #include "py32f002b_it.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -89,5 +90,13 @@ void SysTick_Handler(void)
 /* For the available peripheral interrupt handler names,                      */
 /* please refer to the startup file.                                          */
 /******************************************************************************/
+
+/**
+  * @brief This function handles I2C1 global interrupt.
+  */
+void I2C1_IRQHandler(void)
+{
+  I2C_Device_IRQHandler();
+}
 
 /************************ (C) COPYRIGHT Puya *****END OF FILE******************/

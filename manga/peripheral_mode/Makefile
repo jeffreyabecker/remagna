@@ -29,6 +29,7 @@ BUILD_DIR = build
 # C sources
 C_SOURCES =  \
 Src/main.c \
+Src/i2c_device.c \
 Src/py32f002b_hal_msp.c \
 Src/py32f002b_it.c \
 Src/system_py32f002b.c \

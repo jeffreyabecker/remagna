@@ -31,6 +31,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "py32f002bxx_Start_Kit.h"
+#include "i2c_device.h"
 
 /* Private define ------------------------------------------------------------*/
 #define APP_LED_TOGGLE_PERIOD_MS (500U)
@@ -185,6 +186,8 @@ static void APP_I2C1_Init(void)
   {
     APP_ErrorHandler();
   }
+
+  I2C_Device_Init();
 }
 
 /**

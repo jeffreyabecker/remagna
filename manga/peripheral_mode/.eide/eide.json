@@ -62,6 +62,9 @@
             "path": "Src/main.c"
           },
           {
+            "path": "Src/i2c_device.c"
+          },
+          {
             "path": "Src/py32f002b_hal_msp.c"
           },
           {
