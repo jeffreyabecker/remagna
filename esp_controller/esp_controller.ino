@@ -15,9 +15,8 @@
   *   GPIO5 (DATA)  <-> peripheral DATA (open-drain / pulled up)
   *   GND common
   *
-  * Everything except the two GPIOs and the bit timing comes from the
-  * bitbang_interface library: the frame format, the register map and the
-  * transaction helpers behind Controller.
+  * EspController is the platform side of the link, BleController the BLE front
+  * end that mirrors the register map (see BleController.h for the GATT layout).
   *
   * Button 1 starts a pump cycle, button 2 stops it. The pump is also stopped
   * when the peripheral reports more than 30 s of pressurized time.
@@ -25,11 +24,11 @@
   */
 
 #include <Arduino.h>
+
 #include <protocol.h>
 
-#if !defined(ARDUINO_ARCH_ESP32)
-#error "esp_controller targets the ESP32-C3 Super Mini; select an ESP32-C3 board."
-#endif
+#include "BleController.h"
+#include "EspController.h"
 
 namespace
 {
@@ -40,49 +39,18 @@ constexpr uint8_t PinData = 5;
  * anything from a few microseconds upwards works; 100 us keeps a scope and a
  * polled slave happy. */
 constexpr unsigned HalfBitUs = 100U;
+
+/* How often the read-only characteristics are refreshed from the link. */
+constexpr uint32_t RefreshPeriodMs = 200U;
+
+uint32_t lastRefreshMs = 0U;
 } // namespace
 
-/** Platform side of the contract: clock exactly one bit. */
-class EspController final : public Controller
+EspController panel(PinClk, PinData, HalfBitUs);
+BleController ble;
+
+namespace
 {
-public:
-  void begin()
-  {
-    pinMode(PinClk, OUTPUT);
-    digitalWrite(PinClk, LOW);
-    pinMode(PinData, INPUT_PULLUP);
-  }
-
-protected:
-  bool clockBit(bool drive, bool txLevel) override
-  {
-    if (drive)
-    {
-      pinMode(PinData, OUTPUT);
-      digitalWrite(PinData, txLevel ? HIGH : LOW);
-    }
-    else
-    {
-      pinMode(PinData, INPUT_PULLUP); // release for turnaround / read data
-    }
-
-    delayMicroseconds(HalfBitUs);
-    digitalWrite(PinClk, HIGH);
-    delayMicroseconds(HalfBitUs);
-    const bool rx = digitalRead(PinData) == HIGH; // sample on the high phase
-    digitalWrite(PinClk, LOW);
-    return rx;
-  }
-
-  /** Let the bus idle high between transactions. */
-  void releaseData() override
-  {
-    pinMode(PinData, INPUT_PULLUP);
-  }
-};
-
-EspController panel;
-
 /** Set the pump duty and verify the peripheral applied it. */
 bool setPumpDuty(uint16_t tenthsPercent)
 {
@@ -95,6 +63,7 @@ void pressureGuard()
   if (panel.pressurizedTimeMs() > 30000U)
   {
     setPumpDuty(0);
+    ble.publishPumpDuty(0);
   }
 }
 
@@ -113,32 +82,90 @@ void runPumpCycle()
   }
 }
 
+/** Push the output registers back to BLE after the link applied a write. */
+void publishOutputs()
+{
+  ble.publishPumpDuty(panel.pumpDuty());
+
+  const std::optional<ValveState> valve = panel.valveState();
+  ble.publishValve(valve.has_value() && (valve.value() == ValveState::Open));
+
+  char digits[DisplayDigits] = {};
+  panel.display(digits);
+  ble.publishDisplay(digits);
+}
+
+/** Apply the writes the BLE client queued since the last pass. */
+void applyBleWrites()
+{
+  const BleWrites writes = ble.takeWrites();
+
+  if (writes.pumpDuty)
+  {
+    setPumpDuty(writes.pumpDutyValue);
+    ble.publishPumpDuty(panel.pumpDuty());
+  }
+
+  if (writes.valve)
+  {
+    panel.writeValveState(writes.valveOpen ? ValveState::Open : ValveState::Closed);
+    ble.publishValve(writes.valveOpen);
+  }
+
+  if (writes.display)
+  {
+    panel.writeDisplay(writes.displayDigits);
+    ble.publishDisplay(writes.displayDigits);
+  }
+}
+} // namespace
+
 void setup()
 {
   Serial.begin(115200);
+
   panel.begin();
 
   // Safe state: pump stopped, valve closed.
   setPumpDuty(0);
   panel.writeValveState(ValveState::Closed);
 
+  ble.begin();
+  ble.publishDeviceInfo(panel.deviceId(), panel.mapVersion());
+  publishOutputs();
+
   Serial.printf("magna controller: device 0x%02X, map %u\n", panel.deviceId(), panel.mapVersion());
+  lastRefreshMs = millis();
 }
 
 void loop()
 {
+  applyBleWrites();
+
   const uint8_t buttons = panel.buttons();
 
   if (pressed(buttons, 1U))
   {
     runPumpCycle();
+    publishOutputs();
   }
   else if (pressed(buttons, 2U))
   {
     setPumpDuty(0);
     panel.writeValveState(ValveState::Closed);
+    publishOutputs();
   }
 
   pressureGuard();
+
+  const uint32_t now = millis();
+  if ((now - lastRefreshMs) >= RefreshPeriodMs)
+  {
+    lastRefreshMs = now;
+    ble.publishButtons(buttons);
+    ble.publishBattery(panel.batteryConnected(), panel.batteryMillivolts());
+    ble.publishPressure(panel.pressureAdc(), panel.pressurizedTimeMs());
+  }
+
   delay(50);
 }
