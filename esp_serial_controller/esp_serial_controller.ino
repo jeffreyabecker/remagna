@@ -28,7 +28,8 @@
 
 #include <protocol.h>
 
-#include "EspController.h"
+#include <EspController.h>
+
 #include "SerialController.h"
 
 namespace

@@ -27,8 +27,9 @@
 
 #include <protocol.h>
 
+#include <EspController.h>
+
 #include "BleController.h"
-#include "EspController.h"
 
 namespace
 {
