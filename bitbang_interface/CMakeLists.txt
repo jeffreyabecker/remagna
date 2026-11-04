@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(bitbang_interface LANGUAGES CXX)
 
-add_library(bitbang_interface STATIC src/controller.cpp src/peripheral.cpp)
+add_library(bitbang_interface STATIC src/protocol.cpp)
 target_include_directories(bitbang_interface PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_compile_features(bitbang_interface PUBLIC cxx_std_17)

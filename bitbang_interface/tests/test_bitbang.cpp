@@ -3,9 +3,11 @@
   * @file    test_bitbang.cpp
   * @brief   Loopback tests: real Controller against the real Peripheral engine.
   *
-  * MockPeripheralIo provides canned inputs and records hardware outputs.
   * LoopbackController joins the two engines bit by bit, so every feature test
-  * exercises the shared protocol implementation on both ends.
+  * exercises the shared protocol implementation on both ends. The controller
+  * reads the values the test pushed into the peripheral with its setters, and
+  * the values the controller writes come back through the getters and update
+  * flags. sendRawWrite() plays a rogue controller that skips the API checks.
   ******************************************************************************
   */
 
@@ -13,8 +15,7 @@
 #include <cstdint>
 #include <iostream>
 
-#include "controller.h"
-#include "peripheral.h"
+#include "protocol.h"
 
 namespace rb = remagna::bitbang;
 
@@ -37,68 +38,14 @@ void check(bool condition, const char *expression, const char *file, int line)
 #define CHECK(expr) check((expr), #expr, __FILE__, __LINE__)
 #define CHECK_EQ(actual, expected) check((actual) == (expected), #actual " == " #expected, __FILE__, __LINE__)
 
-class MockPeripheralIo final : public rb::PeripheralIo
-{
-public:
-  std::uint8_t buttons = 0U;
-  bool battery = false;
-  std::uint16_t batteryMv = 0U;
-  std::uint16_t pressure = 0U;
-  std::uint32_t pressurizedMs = 0U;
-
-  std::array<std::uint8_t, rb::reg::kDisplayDigits> display{};
-  std::uint16_t pumpDuty = 0U;
-  std::uint8_t valve = 0U;
-  std::uint32_t displayWrites = 0U;
-  std::uint32_t pumpWrites = 0U;
-  std::uint32_t valveWrites = 0U;
-
-  std::uint8_t readButtons() override
-  {
-    return buttons;
-  }
-
-  bool batteryConnected() override
-  {
-    return battery;
-  }
-
-  std::uint16_t batteryMillivolts() override
-  {
-    return batteryMv;
-  }
-
-  std::uint16_t pressureAdc() override
-  {
-    return pressure;
-  }
-
-  std::uint32_t pressurizedTimeMs() override
-  {
-    return pressurizedMs;
-  }
-
-  void displayWrite(const std::uint8_t digits[rb::reg::kDisplayDigits]) override
-  {
-    for (std::uint8_t i = 0U; i < rb::reg::kDisplayDigits; ++i)
-    {
-      display[i] = digits[i];
-    }
-    ++displayWrites;
-  }
-
-  void applyPumpDuty(std::uint16_t duty) override
-  {
-    pumpDuty = duty;
-    ++pumpWrites;
-  }
-
-  void applyValveState(std::uint8_t state) override
-  {
-    valve = state;
-    ++valveWrites;
-  }
-};
+static_assert(rb::protocol::build(false, false, false, false) == 0x00U);
+static_assert(rb::protocol::build(true, false, true, false) == 0x05U);
+static_assert(rb::protocol::build(true, true, true, true) == 0x0FU);
+static_assert(rb::protocol::pressed(0x05U, 1U));
+static_assert(!rb::protocol::pressed(0x05U, 2U));
+static_assert(rb::protocol::pressed(0x05U, 3U));
+static_assert(!rb::protocol::pressed(0x05U, 0U));
+static_assert(!rb::protocol::pressed(0x05U, 5U));
 
 class LoopbackController final : public rb::Controller
 {
@@ -118,8 +65,12 @@ protected:
       ++releasedBits;
     }
 
-    const bool deviceBit = peripheral_.outputBit();
-    peripheral_.onBit(drive ? txLevel : deviceBit);
+    // Falling edge: the peripheral decides what it puts on DATA.
+    const rb::Peripheral::Drive setup = peripheral_.onBitClocked(false, false);
+    const bool deviceBit = setup == rb::Peripheral::Drive::High;
+
+    // Rising edge: the peripheral samples whichever level is on the wire.
+    (void)peripheral_.onBitClocked(true, drive ? txLevel : deviceBit);
     return deviceBit;
   }
 
@@ -136,119 +87,128 @@ private:
 namespace
 {
 
+/** Drive a write frame straight into the peripheral, bypassing the API checks. */
+void sendRawWrite(rb::Peripheral &peripheral,
+                  std::uint8_t address,
+                  const std::uint8_t *data,
+                  std::uint8_t length)
+{
+  const auto bit = [&peripheral](bool level)
+  {
+    (void)peripheral.onBitClocked(true, level);
+  };
+
+  bit(false); // START
+
+  for (std::uint8_t i = 0U; i < 8U; ++i) bit(false); // command 0x00: write
+
+  for (std::uint8_t i = 0U; i < 8U; ++i) bit(((address >> i) & 0x01U) != 0U);
+  for (std::uint8_t i = 0U; i < 8U; ++i) bit(((length >> i) & 0x01U) != 0U);
+
+  for (std::uint8_t byte = 0U; byte < length; ++byte)
+  {
+    for (std::uint8_t i = 0U; i < 8U; ++i) bit(((data[byte] >> i) & 0x01U) != 0U);
+  }
+}
+
 void testIdentity(rb::Controller &controller)
 {
-  std::uint8_t id = 0U;
-  CHECK_EQ(controller.readDeviceId(id), rb::Status::Ok);
-  CHECK_EQ(id, rb::reg::kDeviceIdValue);
-
-  std::uint8_t version = 0U;
-  CHECK_EQ(controller.readMapVersion(version), rb::Status::Ok);
-  CHECK_EQ(version, rb::reg::kMapVersionValue);
+  CHECK_EQ(controller.deviceId(), rb::reg::DeviceIdValue);
+  CHECK_EQ(controller.mapVersion(), rb::reg::MapVersionValue);
 }
 
-void testDisplay(rb::Controller &controller, MockPeripheralIo &io)
+void testDisplay(rb::Controller &controller, rb::Peripheral &peripheral)
 {
-  std::array<std::uint8_t, rb::Controller::kDisplayDigits> digits{};
-  CHECK_EQ(controller.readDisplay(digits), rb::Status::Ok);
+  const auto blank = controller.display();
 
-  for (const auto digit : digits)
+  for (const auto digit : blank)
   {
-    CHECK_EQ(digit, rb::reg::kDigitBlank);
+    CHECK_EQ(digit, rb::reg::DigitBlank);
   }
 
-  const std::array<std::uint8_t, rb::Controller::kDisplayDigits> expected{0U, 1U, 2U, 3U, 4U, 5U};
-  CHECK_EQ(controller.writeDisplay(expected), rb::Status::Ok);
-  CHECK(io.display == expected);
-  CHECK_EQ(io.displayWrites, 1U);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateNone));
 
-  digits.fill(0U);
-  CHECK_EQ(controller.readDisplay(digits), rb::Status::Ok);
-  CHECK(digits == expected);
+  const std::array<std::uint8_t, rb::Controller::DisplayDigits> expected{0U, 1U, 2U, 3U, 4U, 5U};
+  controller.writeDisplay(expected);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateDisplay));
+  CHECK(peripheral.display() == expected);
+
+  const auto readBack = controller.display();
+  CHECK(readBack == expected);
 }
 
-void testInputs(rb::Controller &controller, MockPeripheralIo &io)
+void testInputs(rb::Controller &controller, rb::Peripheral &peripheral)
 {
-  std::uint8_t buttons = 0U;
-  CHECK_EQ(controller.readButtons(buttons), rb::Status::Ok);
-  CHECK_EQ(buttons, static_cast<std::uint8_t>(rb::reg::kButton1 | rb::reg::kButton3));
+  peripheral.setButtons(rb::protocol::build(true, false, true, false));
 
-  bool connected = false;
-  CHECK_EQ(controller.readBatteryConnected(connected), rb::Status::Ok);
-  CHECK(connected);
+  const std::uint8_t mask = controller.buttons();
+  CHECK(rb::protocol::pressed(mask, 1U));
+  CHECK(!rb::protocol::pressed(mask, 2U));
+  CHECK(rb::protocol::pressed(mask, 3U));
+  CHECK(!rb::protocol::pressed(mask, 4U));
 
-  io.battery = false;
-  CHECK_EQ(controller.readBatteryConnected(connected), rb::Status::Ok);
-  CHECK(!connected);
-  io.battery = true;
+  peripheral.setBatteryConnected(true);
+  CHECK(controller.batteryConnected());
 
-  std::uint16_t millivolts = 0U;
-  CHECK_EQ(controller.readBatteryMillivolts(millivolts), rb::Status::Ok);
-  CHECK_EQ(millivolts, 3000);
+  peripheral.setBatteryConnected(false);
+  CHECK(!controller.batteryConnected());
 
-  std::uint16_t counts = 0U;
-  CHECK_EQ(controller.readPressureAdc(counts), rb::Status::Ok);
-  CHECK_EQ(counts, 0x0123);
+  peripheral.setBatteryMillivolts(3000U);
+  CHECK_EQ(controller.batteryMillivolts(), 3000);
 
-  std::uint32_t milliseconds = 0U;
-  CHECK_EQ(controller.readPressurizedTimeMs(milliseconds), rb::Status::Ok);
-  CHECK_EQ(milliseconds, 123456U);
+  peripheral.setPressureAdc(0x0123U);
+  CHECK_EQ(controller.pressureAdc(), 0x0123);
+
+  peripheral.setPressurizedTimeMs(123456U);
+  CHECK_EQ(controller.pressurizedTimeMs(), 123456U);
 }
 
-void testPump(rb::Controller &controller, MockPeripheralIo &io)
+void testPump(rb::Controller &controller, rb::Peripheral &peripheral)
 {
-  std::uint16_t duty = 0U;
-  CHECK_EQ(controller.readPumpDuty(duty), rb::Status::Ok);
-  CHECK_EQ(duty, 0);
+  CHECK_EQ(controller.pumpDuty(), 0);
 
-  CHECK_EQ(controller.writePumpDuty(750U), rb::Status::Ok);
-  CHECK_EQ(io.pumpDuty, 750);
-  CHECK_EQ(io.pumpWrites, 1U);
+  CHECK(controller.writePumpDuty(750U));
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdatePumpDuty));
+  CHECK_EQ(peripheral.pumpDuty(), 750);
+  CHECK_EQ(controller.pumpDuty(), 750);
 
-  CHECK_EQ(controller.readPumpDuty(duty), rb::Status::Ok);
-  CHECK_EQ(duty, 750);
+  CHECK(controller.writePumpDuty(rb::Controller::PumpDutyMax));
+  CHECK_EQ(peripheral.pumpDuty(), rb::Controller::PumpDutyMax);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdatePumpDuty));
 
-  CHECK_EQ(controller.writePumpDuty(rb::Controller::kPumpDutyMax), rb::Status::Ok);
-  CHECK_EQ(io.pumpDuty, rb::Controller::kPumpDutyMax);
-
-  const std::uint32_t writesBefore = io.pumpWrites;
-  CHECK_EQ(controller.writePumpDuty(static_cast<std::uint16_t>(rb::Controller::kPumpDutyMax + 1U)),
-           rb::Status::InvalidArgument);
-  CHECK_EQ(io.pumpWrites, writesBefore);
+  CHECK(!controller.writePumpDuty(static_cast<std::uint16_t>(rb::Controller::PumpDutyMax + 1U)));
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateNone));
+  CHECK_EQ(peripheral.pumpDuty(), rb::Controller::PumpDutyMax);
 
   // A raw over-limit write is clamped by the peripheral.
   const std::uint8_t over[2] = {0xFFU, 0x03U}; // 1023
-  CHECK_EQ(controller.write(rb::reg::kPumpDuty, over, 2U), rb::Status::Ok);
-  CHECK_EQ(io.pumpDuty, rb::Controller::kPumpDutyMax);
-  CHECK_EQ(controller.readPumpDuty(duty), rb::Status::Ok);
-  CHECK_EQ(duty, rb::Controller::kPumpDutyMax);
+  sendRawWrite(peripheral, rb::reg::PumpDuty, over, 2U);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdatePumpDuty));
+  CHECK_EQ(peripheral.pumpDuty(), rb::Controller::PumpDutyMax);
+  CHECK_EQ(controller.pumpDuty(), rb::Controller::PumpDutyMax);
 }
 
-void testValve(rb::Controller &controller, MockPeripheralIo &io)
+void testValve(rb::Controller &controller, rb::Peripheral &peripheral)
 {
-  rb::ValveState state = rb::ValveState::Closed;
-  CHECK_EQ(controller.readValveState(state), rb::Status::Ok);
-  CHECK(state == rb::ValveState::Closed);
+  CHECK(!peripheral.valveOpen());
+  CHECK(controller.valveState() == rb::ValveState::Closed);
 
-  CHECK_EQ(controller.writeValveState(rb::ValveState::Open), rb::Status::Ok);
-  CHECK_EQ(io.valve, rb::reg::kValveOpen);
-  CHECK_EQ(io.valveWrites, 1U);
+  controller.writeValveState(rb::ValveState::Open);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateValveState));
+  CHECK(peripheral.valveOpen());
+  CHECK(controller.valveState() == rb::ValveState::Open);
 
-  CHECK_EQ(controller.readValveState(state), rb::Status::Ok);
-  CHECK(state == rb::ValveState::Open);
+  controller.writeValveState(rb::ValveState::Closed);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateValveState));
+  CHECK(!peripheral.valveOpen());
+  CHECK(controller.valveState() == rb::ValveState::Closed);
 
+  // An out-of-spec register value is not reported as a valve state.
   const std::uint8_t unknown = 7U;
-  CHECK_EQ(controller.write(rb::reg::kValveState, &unknown, 1U), rb::Status::Ok);
-  CHECK_EQ(controller.readValveState(state), rb::Status::InvalidArgument);
-}
-
-void testInvalidArguments(rb::Controller &controller)
-{
-  std::uint8_t byte = 0U;
-  CHECK_EQ(controller.read(rb::reg::kDeviceId, nullptr, 1U), rb::Status::InvalidArgument);
-  CHECK_EQ(controller.read(rb::reg::kDeviceId, &byte, 0U), rb::Status::InvalidArgument);
-  CHECK_EQ(controller.write(rb::reg::kDeviceId, nullptr, 1U), rb::Status::InvalidArgument);
-  CHECK_EQ(controller.write(rb::reg::kDeviceId, &byte, 0U), rb::Status::InvalidArgument);
+  sendRawWrite(peripheral, rb::reg::ValveState, &unknown, 1U);
+  CHECK_EQ(peripheral.takeUpdates(), static_cast<std::uint8_t>(rb::Peripheral::UpdateValveState));
+  CHECK(!peripheral.valveOpen());
+  CHECK(!controller.valveState().has_value());
 }
 
 void testFrameShape(LoopbackController &controller)
@@ -256,55 +216,71 @@ void testFrameShape(LoopbackController &controller)
   const std::uint32_t releasedBefore = controller.releasedBits;
   const std::uint32_t idleBefore = controller.idleReleases;
 
-  std::uint8_t raw[4] = {};
-  CHECK_EQ(controller.read(rb::reg::kPressurizedTimeMs, raw, 4U), rb::Status::Ok);
+  (void)controller.pressurizedTimeMs();
   CHECK_EQ(controller.releasedBits - releasedBefore, 1U + (4U * 8U));
   CHECK_EQ(controller.idleReleases - idleBefore, 1U);
 
   const std::uint32_t releasedBeforeWrite = controller.releasedBits;
-  const std::uint8_t payload[2] = {0x34U, 0x12U};
-  CHECK_EQ(controller.write(rb::reg::kPumpDuty, payload, 2U), rb::Status::Ok);
+  CHECK(controller.writePumpDuty(750U));
   CHECK_EQ(controller.releasedBits, releasedBeforeWrite);
   CHECK_EQ(controller.idleReleases - idleBefore, 2U);
+}
+
+void testFinalReadBitHeld(rb::Peripheral &peripheral)
+{
+  peripheral.reset();
+
+  const auto bit = [&peripheral](bool level)
+  {
+    (void)peripheral.onBitClocked(true, level);
+  };
+
+  bit(false); // START, controller drives 0
+
+  for (int i = 0; i < 8; ++i) bit(i == 0); // command 0x01: read
+  for (int i = 0; i < 8; ++i) bit(i == 0); // address 0x01: map version
+  for (int i = 0; i < 8; ++i) bit(i == 0); // length 1
+
+  CHECK(peripheral.onBitClocked(false, false) == rb::Peripheral::Drive::Release); // turnaround
+  (void)peripheral.onBitClocked(true, true);
+
+  for (int i = 0; i < 8; ++i)
+  {
+    const rb::Peripheral::Drive drive = peripheral.onBitClocked(false, false);
+    CHECK(drive != rb::Peripheral::Drive::Release); // the last bit is driven too
+    (void)peripheral.onBitClocked(true, drive == rb::Peripheral::Drive::High);
+  }
+
+  CHECK(peripheral.isIdle());
 }
 
 void testAbortRecovery(rb::Peripheral &peripheral, rb::Controller &controller)
 {
   peripheral.reset();
-  peripheral.onBit(false); // START
-  peripheral.onBit(false); // command bit 0: write
-  peripheral.onBit(true);  // first address bit
+  (void)peripheral.onBitClocked(true, false); // START
+  (void)peripheral.onBitClocked(true, false); // command bit 0: write
+  (void)peripheral.onBitClocked(true, true);  // first address bit
   CHECK(!peripheral.isIdle());
 
   peripheral.reset();
   CHECK(peripheral.isIdle());
-
-  std::uint8_t version = 0U;
-  CHECK_EQ(controller.read(rb::reg::kMapVersion, &version, 1U), rb::Status::Ok);
-  CHECK_EQ(version, rb::reg::kMapVersionValue);
+  CHECK_EQ(controller.mapVersion(), rb::reg::MapVersionValue);
 }
 
 } // namespace
 
 int main()
 {
-  MockPeripheralIo io;
-  io.buttons = static_cast<std::uint8_t>(rb::reg::kButton1 | rb::reg::kButton3);
-  io.battery = true;
-  io.batteryMv = 3000U;
-  io.pressure = 0x0123U;
-  io.pressurizedMs = 123456U;
-
-  rb::Peripheral peripheral(io);
+  rb::Peripheral peripheral;
   LoopbackController controller(peripheral);
 
   testIdentity(controller);
-  testDisplay(controller, io);
-  testInputs(controller, io);
-  testPump(controller, io);
-  testValve(controller, io);
-  testInvalidArguments(controller);
+  testDisplay(controller, peripheral);
+  testInputs(controller, peripheral);
+  testPump(controller, peripheral);
+  testValve(controller, peripheral);
   testFrameShape(controller);
+  testFinalReadBitHeld(peripheral);
   testAbortRecovery(peripheral, controller);
 
   if (failures != 0)

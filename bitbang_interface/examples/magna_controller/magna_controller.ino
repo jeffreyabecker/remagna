@@ -22,13 +22,11 @@
   ******************************************************************************
   */
 
-#include <controller.h>
+#include <protocol.h>
 
 using remagna::bitbang::Controller;
-using remagna::bitbang::Status;
 using remagna::bitbang::ValveState;
-using remagna::bitbang::reg::kButton1;
-using remagna::bitbang::reg::kButton2;
+using remagna::bitbang::protocol::pressed;
 
 /**
   * @brief  Platform side of the contract: clock exactly one bit.
@@ -93,13 +91,7 @@ GpioController panel(18, 19, 100);
   */
 bool setPumpDuty(std::uint16_t tenthsPercent)
 {
-  if (panel.writePumpDuty(tenthsPercent) != Status::Ok)
-  {
-    return false;
-  }
-
-  std::uint16_t applied = 0;
-  return panel.readPumpDuty(applied) == Status::Ok && applied == tenthsPercent;
+  return panel.writePumpDuty(tenthsPercent) && (panel.pumpDuty() == tenthsPercent);
 }
 
 /**
@@ -107,10 +99,7 @@ bool setPumpDuty(std::uint16_t tenthsPercent)
   */
 void pressureGuard()
 {
-  std::uint32_t pressurizedMs = 0;
-
-  if ((panel.readPressurizedTimeMs(pressurizedMs) == Status::Ok) &&
-      (pressurizedMs > 30000U))
+  if (panel.pressurizedTimeMs() > 30000U)
   {
     setPumpDuty(0);
   }
@@ -122,10 +111,7 @@ void pressureGuard()
   */
 void runPumpCycle()
 {
-  if (panel.writeValveState(ValveState::Open) != Status::Ok)
-  {
-    return;
-  }
+  panel.writeValveState(ValveState::Open);
 
   for (std::uint16_t duty = 0; duty <= 600; duty += 10)
   {
@@ -148,19 +134,13 @@ void setup()
 
 void loop()
 {
-  std::uint8_t buttons = 0;
+  const std::uint8_t buttons = panel.buttons();
 
-  if (panel.readButtons(buttons) != Status::Ok)
-  {
-    delay(100);
-    return;
-  }
-
-  if ((buttons & kButton1) != 0U)
+  if (pressed(buttons, 1U))
   {
     runPumpCycle();
   }
-  else if ((buttons & kButton2) != 0U)
+  else if (pressed(buttons, 2U))
   {
     setPumpDuty(0);
     panel.writeValveState(ValveState::Closed);
