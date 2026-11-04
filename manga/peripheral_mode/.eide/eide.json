@@ -166,7 +166,7 @@
             "one-elf-section-per-function": true,
             "one-elf-section-per-data": true,
             "C_FLAGS": "",
-            "CXX_FLAGS": ""
+            "CXX_FLAGS": "-fno-exceptions -fno-rtti"
           },
           "asm-compiler": {
             "ASM_FLAGS": ""
@@ -175,7 +175,7 @@
             "output-format": "elf",
             "remove-unused-input-sections": true,
             "LD_FLAGS": " ",
-            "LIB_FLAGS": "-lm"
+            "LIB_FLAGS": "-lstdc++ -lm"
           }
         }
       }

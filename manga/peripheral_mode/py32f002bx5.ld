@@ -85,6 +85,7 @@ SECTIONS
     *(.glue_7)         /* glue arm to thumb code */
     *(.glue_7t)        /* glue thumb to arm code */
     *(.eh_frame)
+    *(.eh_frame*)
 
     KEEP (*(.init))
     KEEP (*(.fini))
@@ -99,6 +100,8 @@ SECTIONS
     . = ALIGN(4);
     *(.rodata)         /* .rodata sections (constants, strings, etc.) */
     *(.rodata*)        /* .rodata* sections (constants, strings, etc.) */
+    *(.gcc_except_table)  /* C++ exception tables, if exceptions are enabled */
+    *(.gcc_except_table*)
     . = ALIGN(4);
   } >FLASH
 
