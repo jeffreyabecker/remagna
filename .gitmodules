@@ -1,3 +1,6 @@
 [submodule "PY32F002B_Firmware"]
 	path = ZP008-p-v10/PY32F002B_Firmware
 	url = https://github.com/OpenPuya/PY32F002B_Firmware.git
+[submodule "libs/ch32v003"]
+	path = libs/ch32v003
+	url = https://github.com/openwch/ch32v003.git
