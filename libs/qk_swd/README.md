@@ -170,7 +170,10 @@ always safe, undershooting a `0` phase turns it into a `1`.
 
 ## Reference
 
-The protocol was reverse engineered from the WCH single line programmer shipped
-in `libs/ch32v003` (`.../CH32V003_1Line_SDIO_Program_Base_on_CH32F103/
-CH32V003_1Line/.../components/singleline.c`), which is the file to read next to
-this one.
+The protocol was reverse engineered from the WCH single line programmer in the
+`openwch/ch32v003` repository — `CH32V003_1Line_Base_on_CH32F103/
+CH32V003_1Line_SDIO_Program_Base_on_CH32F103/CH32V003_1Line/`, with
+`components/singleline.c` holding the wire protocol, `components/flashop.c` the
+flash controller sequences and `components/flash_prg_algorithm.c` the RAM
+algorithm. That tree used to be vendored under `libs/ch32v003`; the manual it
+shipped with now sits next to this README.

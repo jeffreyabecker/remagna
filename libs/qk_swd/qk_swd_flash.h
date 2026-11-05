@@ -134,7 +134,7 @@ namespace QkSwdFlashDetail
 
   /**
    * The reference programmer's algorithm, packed from the byte array in
-   * libs/ch32v003/.../components/flash_prg_algorithm.c (432 bytes).
+   * openwch/ch32v003 components/flash_prg_algorithm.c (432 bytes).
    */
   constexpr uint32_t Algorithm[] = {
       0x00009002U,
