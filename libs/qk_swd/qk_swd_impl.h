@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    qk_swd_impl.h
-  * @brief   Implementation of qkSwd, the debug module layer.
+  * @brief   Implementation of QkSwd, the debug module layer.
   *
   * Included by qk_swd.h after the class declaration. Everything here is a
   * template over the port type, so it has to live in a header; the separate
@@ -17,7 +17,7 @@
 
 #include "qk_swd.h"
 
-namespace qkSwdDetail
+namespace QkSwdDetail
 {
 
 /* CTRL bits.  Bit 0 and 1 are the halt and resume request of the RISC-V debug
@@ -26,6 +26,7 @@ namespace qkSwdDetail
 constexpr uint32_t CtrlHaltRequest = 1U << 0;
 constexpr uint32_t CtrlResumeRequest = 1U << 1;
 constexpr uint32_t CtrlRelease = 1U << 28;
+constexpr uint32_t CtrlRun = 1U << 30;
 constexpr uint32_t CtrlArm = 1U << 31;
 
 /* DMSTATUS groups: bits 9:8 halted, bits 11:10 running, bits 19:18 the reset
@@ -126,22 +127,24 @@ constexpr uint32_t Write32[ProgBufWords] = {0x7b251073U, 0x7b359073U, 0xe0000537
 constexpr uint32_t Block[ProgBufWords] = {0xe0000537U, 0x0f450513U, 0xf693414cU, 0x8563ffc5U,
                                           0x411000d5U, 0xa019c290U, 0xc1104290U, 0xc14c0591U};
 
-} // namespace qkSwdDetail
+} // namespace QkSwdDetail
 
-inline const char *toString(qkSwdStatus status)
+inline const char *toString(QkSwdStatus status)
 {
   switch (status)
   {
-  case qkSwdStatus::Ok:
+  case QkSwdStatus::Ok:
     return "ok";
-  case qkSwdStatus::Argument:
+  case QkSwdStatus::Argument:
     return "argument";
-  case qkSwdStatus::NoResponse:
+  case QkSwdStatus::NoResponse:
     return "no response";
-  case qkSwdStatus::Timeout:
+  case QkSwdStatus::Timeout:
     return "timeout";
-  case qkSwdStatus::AbstractFault:
+  case QkSwdStatus::AbstractFault:
     return "abstract fault";
+  case QkSwdStatus::AlgorithmFault:
+    return "target code fault";
   }
   return "unknown";
 }
@@ -151,32 +154,32 @@ inline const char *toString(qkSwdStatus status)
 /* ------------------------------------------------------------------------- */
 
 template <typename Port>
-const uint32_t *qkSwd<Port>::readProgram(qkSwdWidth width)
+const uint32_t *QkSwd<Port>::readProgram(QkSwdWidth width)
 {
   switch (width)
   {
-  case qkSwdWidth::Byte:
-    return qkSwdDetail::Read8;
-  case qkSwdWidth::Half:
-    return qkSwdDetail::Read16;
-  case qkSwdWidth::Word:
+  case QkSwdWidth::Byte:
+    return QkSwdDetail::Read8;
+  case QkSwdWidth::Half:
+    return QkSwdDetail::Read16;
+  case QkSwdWidth::Word:
   default:
-    return qkSwdDetail::Read32;
+    return QkSwdDetail::Read32;
   }
 }
 
 template <typename Port>
-const uint32_t *qkSwd<Port>::writeProgram(qkSwdWidth width)
+const uint32_t *QkSwd<Port>::writeProgram(QkSwdWidth width)
 {
   switch (width)
   {
-  case qkSwdWidth::Byte:
-    return qkSwdDetail::Write8;
-  case qkSwdWidth::Half:
-    return qkSwdDetail::Write16;
-  case qkSwdWidth::Word:
+  case QkSwdWidth::Byte:
+    return QkSwdDetail::Write8;
+  case QkSwdWidth::Half:
+    return QkSwdDetail::Write16;
+  case QkSwdWidth::Word:
   default:
-    return qkSwdDetail::Write32;
+    return QkSwdDetail::Write32;
   }
 }
 
@@ -185,100 +188,107 @@ const uint32_t *qkSwd<Port>::writeProgram(qkSwdWidth width)
 /* ------------------------------------------------------------------------- */
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::probe()
+QkSwdStatus QkSwd<Port>::probe()
 {
   this->reset();
 
   /* Until these two registers have been written the target keeps its output
    * driver off, the line stays released and every read looks like all ones.
    * 0x5AA5 is the write key, 0x0400 enables the debug output. */
-  write(qkSwdRegister::RegCfgShadow, qkSwdDetail::ConfigKey);
-  write(qkSwdRegister::RegCfgMask, qkSwdDetail::ConfigKey);
+  write(QkSwdRegister::RegCfgShadow, QkSwdDetail::ConfigKey);
+  write(QkSwdRegister::RegCfgMask, QkSwdDetail::ConfigKey);
 
   /* The capability register is the only fixed value on the wire, so it is what
    * tells "a target answered" apart from "the line floated high". */
-  if (read(qkSwdRegister::RegCapStatus) != qkSwdDetail::CapabilitySignature)
+  if (read(QkSwdRegister::RegCapStatus) != QkSwdDetail::CapabilitySignature)
   {
-    return qkSwdStatus::NoResponse;
+    return QkSwdStatus::NoResponse;
   }
-  return qkSwdStatus::Ok;
+  return QkSwdStatus::Ok;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::halt()
+QkSwdStatus QkSwd<Port>::halt()
 {
   /* Halt request plus the arm bit, twice: the first write starts the request,
    * the second one settles it. The third write drops the arm bit and leaves the
    * hart stopped with the halt request latched. */
-  const uint32_t request = qkSwdDetail::CtrlArm | qkSwdDetail::CtrlHaltRequest;
-  write(qkSwdRegister::RegCtrl, request);
-  write(qkSwdRegister::RegCtrl, request);
+  const uint32_t request = QkSwdDetail::CtrlArm | QkSwdDetail::CtrlHaltRequest;
+  write(QkSwdRegister::RegCtrl, request);
+  write(QkSwdRegister::RegCtrl, request);
 
-  const qkSwdStatus status = pollDmStatus(qkSwdDetail::DmHalted, qkSwdDetail::DmHalted);
-  if (status != qkSwdStatus::Ok)
+  const QkSwdStatus status = pollDmStatus(QkSwdDetail::DmHalted, QkSwdDetail::DmHalted);
+  if (status != QkSwdStatus::Ok)
   {
     return status;
   }
 
-  write(qkSwdRegister::RegCtrl, qkSwdDetail::CtrlHaltRequest);
-  return qkSwdStatus::Ok;
+  write(QkSwdRegister::RegCtrl, QkSwdDetail::CtrlHaltRequest);
+  return QkSwdStatus::Ok;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::resume()
+QkSwdStatus QkSwd<Port>::resume()
 {
-  const uint32_t request = qkSwdDetail::CtrlArm | qkSwdDetail::CtrlHaltRequest;
-  write(qkSwdRegister::RegCtrl, request);
-  write(qkSwdRegister::RegCtrl, request);
-  write(qkSwdRegister::RegCtrl, qkSwdDetail::CtrlHaltRequest);
+  const uint32_t request = QkSwdDetail::CtrlArm | QkSwdDetail::CtrlHaltRequest;
+  write(QkSwdRegister::RegCtrl, request);
+  write(QkSwdRegister::RegCtrl, request);
+  write(QkSwdRegister::RegCtrl, QkSwdDetail::CtrlHaltRequest);
 
-  /* Clearing halt and requesting resume in one write, then wait for the running
-   * acknowledge: the hart is only really out of the debug module when both
-   * status bits say so. */
-  write(qkSwdRegister::RegCtrl,
-                qkSwdDetail::CtrlHaltRequest | qkSwdDetail::CtrlResumeRequest);
-  return pollDmStatus(qkSwdDetail::DmRunning, qkSwdDetail::DmRunning);
+  /* Run. 0x40000001 is what the reference programmer writes to leave the pause
+   * mode: bit 30 plus a latched halt request, not the resumereq bit. The hart is
+   * only really running when both running status bits say so - which is why a
+   * hart that halts again immediately (an ebreak right at the entry point, as
+   * in a flash syscall) can make this return Timeout. */
+  write(QkSwdRegister::RegCtrl, QkSwdDetail::CtrlRun | QkSwdDetail::CtrlHaltRequest);
+  return pollDmStatus(QkSwdDetail::DmRunning, QkSwdDetail::DmRunning);
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::coreReset()
+QkSwdStatus QkSwd<Port>::waitHalted()
+{
+  return pollDmStatus(QkSwdDetail::DmHalted, QkSwdDetail::DmHalted);
+}
+
+template <typename Port>
+QkSwdStatus QkSwd<Port>::coreReset()
 {
   /* Assert the reset, wait until the debug module reports it, then release and
    * wait until the acknowledge clears. The hart runs afterwards. */
-  write(qkSwdRegister::RegCtrl,
-                qkSwdDetail::CtrlHaltRequest | qkSwdDetail::CtrlResumeRequest);
+  write(QkSwdRegister::RegCtrl,
+                QkSwdDetail::CtrlHaltRequest | QkSwdDetail::CtrlResumeRequest);
 
-  qkSwdStatus status = pollDmStatus(qkSwdDetail::DmReset, qkSwdDetail::DmReset);
-  if (status != qkSwdStatus::Ok)
+  QkSwdStatus status = pollDmStatus(QkSwdDetail::DmReset, QkSwdDetail::DmReset);
+  if (status != QkSwdStatus::Ok)
   {
     return status;
   }
 
-  write(qkSwdRegister::RegCtrl, qkSwdDetail::CtrlHaltRequest);
-  write(qkSwdRegister::RegCtrl,
-                qkSwdDetail::CtrlRelease | qkSwdDetail::CtrlHaltRequest);
-  return pollDmStatus(qkSwdDetail::DmReset, 0U);
+  write(QkSwdRegister::RegCtrl, QkSwdDetail::CtrlHaltRequest);
+  write(QkSwdRegister::RegCtrl,
+                QkSwdDetail::CtrlRelease | QkSwdDetail::CtrlHaltRequest);
+  return pollDmStatus(QkSwdDetail::DmReset, 0U);
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::dmReset()
+QkSwdStatus QkSwd<Port>::dmReset()
 {
   /* The debug module resets itself, so nothing is expected to answer while it
    * is away; what is checked here is that it came back. A reset debug module
    * needs probe() again before it accepts register traffic. */
-  const uint32_t request = qkSwdDetail::CtrlHaltRequest | qkSwdDetail::CtrlResumeRequest;
-  write(qkSwdRegister::RegCtrl, request);
-  if (read(qkSwdRegister::RegCtrl) != request)
+  const uint32_t request = QkSwdDetail::CtrlHaltRequest | QkSwdDetail::CtrlResumeRequest;
+  write(QkSwdRegister::RegCtrl, request);
+  if (read(QkSwdRegister::RegCtrl) != request)
   {
-    return qkSwdStatus::NoResponse;
+    return QkSwdStatus::NoResponse;
   }
 
-  write(qkSwdRegister::RegCtrl, qkSwdDetail::CtrlResumeRequest);
-  if ((read(qkSwdRegister::RegCtrl) & qkSwdDetail::CtrlResumeRequest) != 0U)
+  write(QkSwdRegister::RegCtrl, QkSwdDetail::CtrlResumeRequest);
+  if ((read(QkSwdRegister::RegCtrl) & QkSwdDetail::CtrlResumeRequest) != 0U)
   {
-    return qkSwdStatus::Timeout;
+    return QkSwdStatus::Timeout;
   }
-  return qkSwdStatus::Ok;
+  return QkSwdStatus::Ok;
 }
 
 
@@ -287,63 +297,63 @@ qkSwdStatus qkSwd<Port>::dmReset()
 /* ------------------------------------------------------------------------- */
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::pollDmStatus(uint32_t mask, uint32_t value)
+QkSwdStatus QkSwd<Port>::pollDmStatus(uint32_t mask, uint32_t value)
 {
-  uint32_t status = qkSwdDetail::DmBusy;
+  uint32_t status = QkSwdDetail::DmBusy;
 
-  for (uint16_t attempt = 0; attempt < qkSwdDetail::DmPollAttempts; ++attempt)
+  for (uint16_t attempt = 0; attempt < QkSwdDetail::DmPollAttempts; ++attempt)
   {
-    status = read(qkSwdRegister::RegDmStatus);
+    status = read(QkSwdRegister::RegDmStatus);
 
     /* All ones means nothing is answering; keep trying, the target may still be
      * busy rather than absent. */
-    if ((status != qkSwdDetail::DmBusy) && ((status & mask) == value))
+    if ((status != QkSwdDetail::DmBusy) && ((status & mask) == value))
     {
-      return qkSwdStatus::Ok;
+      return QkSwdStatus::Ok;
     }
-    this->pauseNs(qkSwdDetail::PollIntervalNs);
+    this->pauseNs(QkSwdDetail::PollIntervalNs);
   }
-  return qkSwdStatus::Timeout;
+  return QkSwdStatus::Timeout;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::pollAbstract()
+QkSwdStatus QkSwd<Port>::pollAbstract()
 {
-  for (uint16_t attempt = 0; attempt < qkSwdDetail::AbstractPollAttempts; ++attempt)
+  for (uint16_t attempt = 0; attempt < QkSwdDetail::AbstractPollAttempts; ++attempt)
   {
-    const uint32_t status = read(qkSwdRegister::RegAbstractCs);
+    const uint32_t status = read(QkSwdRegister::RegAbstractCs);
 
-    if ((status & qkSwdDetail::AbstractBusy) == 0U)
+    if ((status & QkSwdDetail::AbstractBusy) == 0U)
     {
-      if ((status & qkSwdDetail::AbstractError) != 0U)
+      if ((status & QkSwdDetail::AbstractError) != 0U)
       {
         /* The exception code is sticky. Clearing it keeps the next command from
          * looking broken for the same reason. */
-        write(qkSwdRegister::RegAbstractCs, qkSwdDetail::AbstractError);
-        return qkSwdStatus::AbstractFault;
+        write(QkSwdRegister::RegAbstractCs, QkSwdDetail::AbstractError);
+        return QkSwdStatus::AbstractFault;
       }
-      return qkSwdStatus::Ok;
+      return QkSwdStatus::Ok;
     }
-    this->pauseNs(qkSwdDetail::PollIntervalNs);
+    this->pauseNs(QkSwdDetail::PollIntervalNs);
   }
-  return qkSwdStatus::Timeout;
+  return QkSwdStatus::Timeout;
 }
 
 template <typename Port>
-void qkSwd<Port>::loadProgBuf(const uint32_t *program)
+void QkSwd<Port>::loadProgBuf(const uint32_t *program)
 {
-  for (uint8_t word = 0; word < qkSwdDetail::ProgBufWords; ++word)
+  for (uint8_t word = 0; word < QkSwdDetail::ProgBufWords; ++word)
   {
-    write(static_cast<qkSwdRegister>(static_cast<uint8_t>(qkSwdRegister::RegProgBuf0) + word),
+    write(static_cast<QkSwdRegister>(static_cast<uint8_t>(QkSwdRegister::RegProgBuf0) + word),
                   program[word]);
   }
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::executeProgBuf()
+QkSwdStatus QkSwd<Port>::executeProgBuf()
 {
   /* cmdtype 0, transfer clear, postexec set: run PROGBUF on the halted hart. */
-  write(qkSwdRegister::RegCommand, qkSwdDetail::CmdPostExec);
+  write(QkSwdRegister::RegCommand, QkSwdDetail::CmdPostExec);
   return pollAbstract();
 }
 
@@ -352,72 +362,72 @@ qkSwdStatus qkSwd<Port>::executeProgBuf()
 /* ------------------------------------------------------------------------- */
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::readGpr(uint8_t index, uint32_t &value)
+QkSwdStatus QkSwd<Port>::readGpr(uint8_t index, uint32_t &value)
 {
   if (index > 31U)
   {
-    return qkSwdStatus::Argument;
+    return QkSwdStatus::Argument;
   }
 
-  write(qkSwdRegister::RegCommand,
-                qkSwdDetail::CmdSize32 | qkSwdDetail::CmdTransfer | index);
-  const qkSwdStatus status = pollAbstract();
-  if (status != qkSwdStatus::Ok)
+  write(QkSwdRegister::RegCommand,
+                QkSwdDetail::CmdSize32 | QkSwdDetail::CmdTransfer | index);
+  const QkSwdStatus status = pollAbstract();
+  if (status != QkSwdStatus::Ok)
   {
     return status;
   }
 
-  value = read(qkSwdRegister::RegData0);
-  return qkSwdStatus::Ok;
+  value = read(QkSwdRegister::RegData0);
+  return QkSwdStatus::Ok;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::writeGpr(uint8_t index, uint32_t value)
+QkSwdStatus QkSwd<Port>::writeGpr(uint8_t index, uint32_t value)
 {
   if (index > 31U)
   {
-    return qkSwdStatus::Argument;
+    return QkSwdStatus::Argument;
   }
 
   /* The value always travels through DATA0 before the command that consumes it:
    * the command write is what triggers the transfer. */
-  write(qkSwdRegister::RegData0, value);
-  write(qkSwdRegister::RegCommand,
-                qkSwdDetail::CmdSize32 | qkSwdDetail::CmdTransfer | qkSwdDetail::CmdWrite | index);
+  write(QkSwdRegister::RegData0, value);
+  write(QkSwdRegister::RegCommand,
+                QkSwdDetail::CmdSize32 | QkSwdDetail::CmdTransfer | QkSwdDetail::CmdWrite | index);
   return pollAbstract();
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::readCsr(uint16_t csr, uint32_t &value)
+QkSwdStatus QkSwd<Port>::readCsr(uint16_t csr, uint32_t &value)
 {
   if (csr > 0x0FFFU)
   {
-    return qkSwdStatus::Argument;
+    return QkSwdStatus::Argument;
   }
 
-  write(qkSwdRegister::RegCommand,
-                qkSwdDetail::CmdSize32 | qkSwdDetail::CmdTransfer | csr);
-  const qkSwdStatus status = pollAbstract();
-  if (status != qkSwdStatus::Ok)
+  write(QkSwdRegister::RegCommand,
+                QkSwdDetail::CmdSize32 | QkSwdDetail::CmdTransfer | csr);
+  const QkSwdStatus status = pollAbstract();
+  if (status != QkSwdStatus::Ok)
   {
     return status;
   }
 
-  value = read(qkSwdRegister::RegData0);
-  return qkSwdStatus::Ok;
+  value = read(QkSwdRegister::RegData0);
+  return QkSwdStatus::Ok;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::writeCsr(uint16_t csr, uint32_t value)
+QkSwdStatus QkSwd<Port>::writeCsr(uint16_t csr, uint32_t value)
 {
   if (csr > 0x0FFFU)
   {
-    return qkSwdStatus::Argument;
+    return QkSwdStatus::Argument;
   }
 
-  write(qkSwdRegister::RegData0, value);
-  write(qkSwdRegister::RegCommand,
-                qkSwdDetail::CmdSize32 | qkSwdDetail::CmdTransfer | qkSwdDetail::CmdWrite | csr);
+  write(QkSwdRegister::RegData0, value);
+  write(QkSwdRegister::RegCommand,
+                QkSwdDetail::CmdSize32 | QkSwdDetail::CmdTransfer | QkSwdDetail::CmdWrite | csr);
   return pollAbstract();
 }
 
@@ -426,40 +436,40 @@ qkSwdStatus qkSwd<Port>::writeCsr(uint16_t csr, uint32_t value)
 /* ------------------------------------------------------------------------- */
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::readMemoryOnce(uint32_t address, uint32_t &value, qkSwdWidth width)
+QkSwdStatus QkSwd<Port>::readMemoryOnce(uint32_t address, uint32_t &value, QkSwdWidth width)
 {
-  write(qkSwdRegister::RegData1, address); // the address goes in
+  write(QkSwdRegister::RegData1, address); // the address goes in
   loadProgBuf(readProgram(width));
-  const qkSwdStatus status = executeProgBuf();
-  if (status != qkSwdStatus::Ok)
+  const QkSwdStatus status = executeProgBuf();
+  if (status != QkSwdStatus::Ok)
   {
     return status;
   }
 
-  value = read(qkSwdRegister::RegData0); // the value comes back here
-  return qkSwdStatus::Ok;
+  value = read(QkSwdRegister::RegData0); // the value comes back here
+  return QkSwdStatus::Ok;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::writeMemoryOnce(uint32_t address, uint32_t value, qkSwdWidth width)
+QkSwdStatus QkSwd<Port>::writeMemoryOnce(uint32_t address, uint32_t value, QkSwdWidth width)
 {
-  write(qkSwdRegister::RegData0, value);
-  write(qkSwdRegister::RegData1, address);
+  write(QkSwdRegister::RegData0, value);
+  write(QkSwdRegister::RegData1, address);
   loadProgBuf(writeProgram(width));
   return executeProgBuf();
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::readMemory(uint32_t address, uint32_t &value, qkSwdWidth width)
+QkSwdStatus QkSwd<Port>::readMemory(uint32_t address, uint32_t &value, QkSwdWidth width)
 {
   /* A failed access is usually the hart tripping on a protected or absent
    * address, which is permanent, but a target that was still waking up looks
    * the same. Retrying a read is free, so it is worth it. */
-  qkSwdStatus status = qkSwdStatus::Ok;
-  for (uint8_t attempt = 0; attempt < qkSwdDetail::TransferAttempts; ++attempt)
+  QkSwdStatus status = QkSwdStatus::Ok;
+  for (uint8_t attempt = 0; attempt < QkSwdDetail::TransferAttempts; ++attempt)
   {
     status = readMemoryOnce(address, value, width);
-    if (status == qkSwdStatus::Ok)
+    if (status == QkSwdStatus::Ok)
     {
       break;
     }
@@ -468,13 +478,13 @@ qkSwdStatus qkSwd<Port>::readMemory(uint32_t address, uint32_t &value, qkSwdWidt
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::writeMemory(uint32_t address, uint32_t value, qkSwdWidth width)
+QkSwdStatus QkSwd<Port>::writeMemory(uint32_t address, uint32_t value, QkSwdWidth width)
 {
-  qkSwdStatus status = qkSwdStatus::Ok;
-  for (uint8_t attempt = 0; attempt < qkSwdDetail::TransferAttempts; ++attempt)
+  QkSwdStatus status = QkSwdStatus::Ok;
+  for (uint8_t attempt = 0; attempt < QkSwdDetail::TransferAttempts; ++attempt)
   {
     status = writeMemoryOnce(address, value, width);
-    if (status == qkSwdStatus::Ok)
+    if (status == QkSwdStatus::Ok)
     {
       break;
     }
@@ -483,29 +493,29 @@ qkSwdStatus qkSwd<Port>::writeMemory(uint32_t address, uint32_t value, qkSwdWidt
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::readMemoryBlock(uint32_t address, uint32_t *buffer, uint16_t &words)
+QkSwdStatus QkSwd<Port>::readMemoryBlock(uint32_t address, uint32_t *buffer, uint16_t &words)
 {
   if ((buffer == nullptr) || (words == 0U))
   {
-    return qkSwdStatus::Argument;
+    return QkSwdStatus::Argument;
   }
 
   const uint16_t requested = words;
   if (requested == 1U)
   {
-    return readMemoryOnce(address, buffer[0], qkSwdWidth::Word);
+    return readMemoryOnce(address, buffer[0], QkSwdWidth::Word);
   }
 
   /* Auto increment is armed before the command runs, so from here on every
    * DATA0 access re-runs the burst program and advances its own pointer. */
-  write(qkSwdRegister::RegData1, address);
-  write(qkSwdRegister::RegAutoExec, qkSwdDetail::AutoIncrement);
-  loadProgBuf(qkSwdDetail::Block);
+  write(QkSwdRegister::RegData1, address);
+  write(QkSwdRegister::RegAutoExec, QkSwdDetail::AutoIncrement);
+  loadProgBuf(QkSwdDetail::Block);
 
-  qkSwdStatus status = executeProgBuf();
-  if (status != qkSwdStatus::Ok)
+  QkSwdStatus status = executeProgBuf();
+  if (status != QkSwdStatus::Ok)
   {
-    write(qkSwdRegister::RegAutoExec, 0U);
+    write(QkSwdRegister::RegAutoExec, 0U);
     words = 0U;
     return status;
   }
@@ -513,62 +523,62 @@ qkSwdStatus qkSwd<Port>::readMemoryBlock(uint32_t address, uint32_t *buffer, uin
   /* One ordinary frame, then one continue frame per further word, then the last
    * word with auto increment already off: the burst program bumps DATA1 before
    * it finishes, so the final value would otherwise be missed. */
-  buffer[0] = read(qkSwdRegister::RegData0);
+  buffer[0] = read(QkSwdRegister::RegData0);
   for (uint16_t index = 1U; index < static_cast<uint16_t>(requested - 1U); ++index)
   {
     buffer[index] = this->readContinue();
   }
 
-  write(qkSwdRegister::RegAutoExec, 0U);
+  write(QkSwdRegister::RegAutoExec, 0U);
   status = pollAbstract();
-  if (status != qkSwdStatus::Ok)
+  if (status != QkSwdStatus::Ok)
   {
     words = 1U;
     return status;
   }
 
-  buffer[requested - 1U] = read(qkSwdRegister::RegData0);
+  buffer[requested - 1U] = read(QkSwdRegister::RegData0);
   words = requested;
-  return qkSwdStatus::Ok;
+  return QkSwdStatus::Ok;
 }
 
 template <typename Port>
-qkSwdStatus qkSwd<Port>::writeMemoryBlock(uint32_t address, const uint32_t *buffer,
+QkSwdStatus QkSwd<Port>::writeMemoryBlock(uint32_t address, const uint32_t *buffer,
                                           uint16_t &words)
 {
   if ((buffer == nullptr) || (words == 0U))
   {
-    return qkSwdStatus::Argument;
+    return QkSwdStatus::Argument;
   }
 
   const uint16_t requested = words;
   if (requested == 1U)
   {
-    return writeMemoryOnce(address, buffer[0], qkSwdWidth::Word);
+    return writeMemoryOnce(address, buffer[0], QkSwdWidth::Word);
   }
 
   /* The first word is staged in DATA0 with a normal frame, before the burst
    * program exists; bit 0 of the address tells it "store, not load". */
-  write(qkSwdRegister::RegData0, buffer[0]);
-  write(qkSwdRegister::RegData1, address | 0x01U);
-  loadProgBuf(qkSwdDetail::Block);
+  write(QkSwdRegister::RegData0, buffer[0]);
+  write(QkSwdRegister::RegData1, address | 0x01U);
+  loadProgBuf(QkSwdDetail::Block);
 
-  const qkSwdStatus status = executeProgBuf();
-  if (status != qkSwdStatus::Ok)
+  const QkSwdStatus status = executeProgBuf();
+  if (status != QkSwdStatus::Ok)
   {
     words = 0U;
     return status;
   }
 
-  write(qkSwdRegister::RegAutoExec, qkSwdDetail::AutoIncrement);
+  write(QkSwdRegister::RegAutoExec, QkSwdDetail::AutoIncrement);
   for (uint16_t index = 1U; index < requested; ++index)
   {
     this->writeContinue(buffer[index]);
   }
-  write(qkSwdRegister::RegAutoExec, 0U);
+  write(QkSwdRegister::RegAutoExec, 0U);
 
   words = requested;
-  return qkSwdStatus::Ok;
+  return QkSwdStatus::Ok;
 }
 
 #endif // QK_SWD_IMPL_H

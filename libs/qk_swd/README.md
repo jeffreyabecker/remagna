@@ -12,24 +12,28 @@ the frame layout, not a port of the reference programmer.
 
 | file | contents |
 |------|----------|
-| `qk_swd_wire.h` | wire format, timing table, `qkSwdTiming`, `qkSwdWire` (CRTP base) |
-| `qk_swd.h` | register map, status/width types, `qkSwd` declaration |
+| `qk_swd_wire.h` | wire format, timing table, `QkSwdTiming`, `QkSwdWire` (CRTP base) |
+| `qk_swd.h` | register map, status/width types, `QkSwd` declaration |
 | `qk_swd_impl.h` | the debug module semantics on top of the frames |
+| `qk_swd_flash.h` | flash targets, the RAM algorithm blob, `QkSwdFlash` declaration |
+| `qk_swd_flash_impl.h` | the flash routines on top of the debug module |
 
-Everything is header only: `qk_swd.h` includes `qk_swd_impl.h` at the bottom.
+Everything is header only: `qk_swd.h` includes `qk_swd_impl.h`, and
+`qk_swd_flash.h` includes `qk_swd_flash_impl.h`.
 
 ```
-qkSwdWire<Port>   bits, frames, timing, line reset             <- the protocol
+QkSwdWire<Port>   bits, frames, timing, line reset             <- the protocol
 Port              five pin calls, inherits the frames          <- hardware
-qkSwd<Port>       registers, halt, abstract commands, PROGBUF  <- the meaning
+QkSwd<Port>       registers, halt, abstract commands, PROGBUF  <- the meaning
+QkSwdFlash<Port>  algorithm syscalls, controller pokes         <- the eraser
 ```
 
 Each layer derives from the one below, so the whole stack is a single object: the
 pin, the frames and the debug module. The port is not stored inside the wire and
-the wire is not stored inside the debugger; `struct MyLine : qkSwdWire<MyLine>`
+the wire is not stored inside the debugger; `struct MyLine : QkSwdWire<MyLine>`
 inherits `write()`, `read()`, `writeContinue()`, `readContinue()`, `reset()`,
 `sendBit()`, `readBits()` and friends, supplies the five pin calls the wire
-reaches through a single `static_cast`, and `qkSwd<MyLine>` adds the debug module
+reaches through a single `static_cast`, and `QkSwd<MyLine>` adds the debug module
 on top of that.
 
 Substituting the type rather than dispatching through a base interface is what
@@ -42,7 +46,7 @@ at all.
 ## Usage
 
 ```cpp
-struct MyLine : qkSwdWire<MyLine>
+struct MyLine : QkSwdWire<MyLine>
 {
   void driveLow() { ... }           // pin low, push pull
   void driveHigh() { ... }          // pin high, push pull
@@ -51,23 +55,58 @@ struct MyLine : qkSwdWire<MyLine>
   void waitNs(uint32_t ns) { ... }  // never returns early
 };
 
-qkSwd<MyLine> debugger;
+QkSwd<MyLine> debugger;
 
-if (debugger.probe() != qkSwdStatus::Ok) { /* no target */ }
+if (debugger.probe() != QkSwdStatus::Ok) { /* no target */ }
 debugger.halt();
 
-debugger.write(qkSwdRegister::RegCtrl, 0x00000001u);  // typed register frame
+debugger.write(QkSwdRegister::RegCtrl, 0x00000001u);  // typed register frame
 debugger.write(0x11, 0x12345678u);                   // or a raw byte address
-debugger.setTiming(qkSwdTiming::fast());
+debugger.setTiming(QkSwdTiming::fast());
 ```
 
-`qkSwdStatus`, `qkSwdWidth` and `qkSwdRegister` live at file scope so a call site
+`QkSwdStatus`, `QkSwdWidth` and `QkSwdRegister` live at file scope so a call site
 never has to spell out the template argument.
 
 Everything the wire offers is on the same object: `write()`, `read()`,
 `writeContinue()`, `readContinue()`, `reset()`, `setTiming()`, `pauseNs()`, and
 the bit primitives `sendBit()`, `sendWordBits()`, `readBits()`, `sendStop()` that
 the frames are built from.
+
+## Flashing
+
+The debug module can only read and write RAM, so erasing and programming has to
+happen **on** the target. Two routes, both ported from the reference programmer:
+
+**RAM algorithm** — `QkSwdFlashDetail::Algorithm` is the reference's 432-byte
+blob (`init`, `uninit`, `eraseChip`, `eraseSector`, `programPage`) copied into
+SRAM at `0x20000000`, with a 1 KB staging buffer at `0x20000200`. Calling it is
+an ordinary function call over the debug module:
+
+1. args in `a0..a3`, `sp` from the target struct, `ra` pointing at an `ebreak`
+2. `dpc` = entry, `dcsr` = `0x9603` so `ebreak` enters the debug module
+3. resume, wait for the halt, read `a0`: zero means success
+
+```cpp
+QkSwdFlash<MyLine> flash;
+flash.probe();
+flash.halt();
+flash.loadAlgorithm();                    // copy blob + run init
+flash.eraseChip();                        // or flash.eraseSector(addr)
+flash.program(0x08000000, image, words);  // staged in 1 KB chunks
+flash.lockFlash();
+flash.requestSystemReset();
+```
+
+**Controller registers** — the reference's "fast mode": `unlockFastMode()`, then
+`resetPageBuffer()` / `loadPageBuffer()` per word / `erasePage()` / `writePage()`.
+No RAM code, one abstract-command round trip per word, page sized operations
+only.
+
+Also ported: `readOptionByte()`, `eraseOptionBytePage()`, `removeReadProtect()`
+(needed when the option byte says the part is read protected) and
+`requestSystemReset()`, which asks for the reset through the NVIC's keyed
+control register because this part has no reboot-it-now debug command.
 
 ## The system in one page
 
@@ -91,7 +130,7 @@ every frame is 41 bits.
 
 ## Timing
 
-All phases are minimums, in nanoseconds, `qkSwdTiming`:
+All phases are minimums, in nanoseconds, `QkSwdTiming`:
 
 | phase | medium | fast | why |
 |-------|--------|------|-----|
@@ -115,7 +154,7 @@ Two consequences worth remembering:
 
 ## Porting
 
-Derive from `qkSwdWire<YourLine>` and implement the five calls: a GPIO for the
+Derive from `QkSwdWire<YourLine>` and implement the five calls: a GPIO for the
 four drive/sample calls and any monotonic time base (timer counter, cycle
 counter, `SYSTICK`) for `waitNs()`. On ch32fun that is `funPinMode` /
 `funDigitalWrite` / `funDigitalRead` plus a free running timer read, with the pin
@@ -123,7 +162,7 @@ switched between output push-pull and input float on every `driveLow()` /
 `release()`.
 
 The wire calls each of the five through `static_cast<Derived *>(this)`, so a
-missing or misspelled one shows up as a compile error inside `qkSwdWire` naming
+missing or misspelled one shows up as a compile error inside `QkSwdWire` naming
 the call.
 
 `waitNs()` only has to be accurate to a few tens of nanoseconds; overshooting is

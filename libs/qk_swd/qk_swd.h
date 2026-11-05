@@ -3,11 +3,11 @@
   * @file    qk_swd.h
   * @brief   The WCH single wire debug protocol at the debug module level.
   *
-  * qkSwdWire (see qk_swd_wire.h) takes care of what a 0, a 1 and a frame look
+  * QkSwdWire (see qk_swd_wire.h) takes care of what a 0, a 1 and a frame look
   * like on the wire. This class is the layer above it: what the 32 bit payload
   * of a frame means.
   *
-  * DEBUG MODULE REGISTERS (7 bit addresses, see qkSwdRegister)
+  * DEBUG MODULE REGISTERS (7 bit addresses, see QkSwdRegister)
   * ----------------------------------------------------------
   *   0x04 DATA0       data in / out of the abstract command engine
   *   0x05 DATA1       second data register, used for the address
@@ -26,18 +26,18 @@
   * is addressed by the address byte of a frame, so a "register read" costs one
   * frame and a "register write" costs one frame.
   *
-  * Usage is: a port line that derives from qkSwdWire<PortLine>, then qkSwd on
+  * Usage is: a port line that derives from QkSwdWire<PortLine>, then QkSwd on
   * top of it. The stack is one object - pin, frames and debug module - because
   * each layer derives from the one below instead of holding a reference to it.
   *
-  *     struct MyLine : qkSwdWire<MyLine>
+  *     struct MyLine : QkSwdWire<MyLine>
   *     {
   *       void driveLow();  void driveHigh();  void release();
   *       bool sample();    void waitNs(uint32_t ns);
   *     };
   *
-  *     qkSwd<MyLine> debugger;
-  *     if (debugger.probe() != qkSwdStatus::Ok) { ... }
+  *     QkSwd<MyLine> debugger;
+  *     if (debugger.probe() != QkSwdStatus::Ok) { ... }
   *     debugger.halt();
   *
   * probe() runs once after power up; the abstract command helpers (readGpr,
@@ -54,17 +54,18 @@
 #include "qk_swd_wire.h"
 
 /** Result of an operation that involves the target answering something. */
-enum class qkSwdStatus : uint8_t
+enum class QkSwdStatus : uint8_t
 {
   Ok = 0,
   Argument,      /**< the caller asked for something a frame cannot carry */
   NoResponse,    /**< no debug module answered the capability read */
   Timeout,       /**< the debug module never settled a status bit */
   AbstractFault, /**< the hart reported an exception for the abstract command */
+  AlgorithmFault, /**< code the debugger ran on the target reported a failure */
 };
 
 /** Access width of the memory helpers, matching the PROGBUF variants. */
-enum class qkSwdWidth : uint8_t
+enum class QkSwdWidth : uint8_t
 {
   Byte = 0,
   Half = 1,
@@ -75,7 +76,7 @@ enum class qkSwdWidth : uint8_t
   * Debug module register addresses, 7 bit. The wire adds the direction bit, so
   * RegDmStatus becomes 0x22 for a write and 0x22 for a read of DMSTATUS.
   */
-enum class qkSwdRegister : uint8_t
+enum class QkSwdRegister : uint8_t
 {
   RegData0 = 0x04,
   RegData1 = 0x05,
@@ -94,24 +95,24 @@ enum class qkSwdRegister : uint8_t
 };
 
 /** Text form of a status, for logs. */
-const char *toString(qkSwdStatus status);
+const char *toString(QkSwdStatus status);
 
 /**
   * Debug module layer, mixed into the port by CRTP.
   *
-  * Port derives from qkSwdWire<Port> and supplies the five line calls; deriving
+  * Port derives from QkSwdWire<Port> and supplies the five line calls; deriving
   * from Port here puts write(), read(), readContinue(), reset() and the bit
   * helpers one inheritance hop away, already inlined. There is no wire handle to
   * store, hand around or keep alive.
   */
 template <typename Port>
-class qkSwd : public Port
+class QkSwd : public Port
 {
 public:
-  qkSwd() = default;
+  QkSwd() = default;
 
   /** Hand a configured port in; it is copied into the base subobject. */
-  explicit qkSwd(Port port) : Port(static_cast<Port &&>(port)) {}
+  explicit QkSwd(Port port) : Port(static_cast<Port &&>(port)) {}
 
   /**
     * Raw frames. The register enum is accepted directly, and the byte taking
@@ -124,38 +125,45 @@ public:
   using Port::write;
 
   /** Write one debug module register. */
-  void write(qkSwdRegister reg, uint32_t value)
+  void write(QkSwdRegister reg, uint32_t value)
   {
     Port::write(static_cast<uint8_t>(reg), value);
   }
 
   /** Read one debug module register. */
-  uint32_t read(qkSwdRegister reg) { return Port::read(static_cast<uint8_t>(reg)); }
+  uint32_t read(QkSwdRegister reg) { return Port::read(static_cast<uint8_t>(reg)); }
 
   /**
     * Forces the target out of whatever frame it was in, enables its output
     * driver and checks that a debug module answers. Run once after power up.
     */
-  qkSwdStatus probe();
+  QkSwdStatus probe();
 
   /** Halt the hart and leave it stopped. */
-  qkSwdStatus halt();
+  QkSwdStatus halt();
 
   /** Let the halted hart run again. */
-  qkSwdStatus resume();
+  QkSwdStatus resume();
+
+  /**
+    * Wait until the hart has stopped on its own (an ebreak, a breakpoint, a
+    * fault). This is the other half of resume(): the flash syscall protocol
+    * relies on the target code ending in ebreak and reporting through a0.
+    */
+  QkSwdStatus waitHalted();
 
   /** Pulse the hart reset and leave the hart running. */
-  qkSwdStatus coreReset();
+  QkSwdStatus coreReset();
 
   /** Reset the debug module itself, taking the DebugModuleControl with it. */
-  qkSwdStatus dmReset();
+  QkSwdStatus dmReset();
 
   /* Abstract commands. These drive the hart, so they need a halted target. */
 
-  qkSwdStatus readGpr(uint8_t index, uint32_t &value);
-  qkSwdStatus writeGpr(uint8_t index, uint32_t value);
-  qkSwdStatus readCsr(uint16_t csr, uint32_t &value);
-  qkSwdStatus writeCsr(uint16_t csr, uint32_t value);
+  QkSwdStatus readGpr(uint8_t index, uint32_t &value);
+  QkSwdStatus writeGpr(uint8_t index, uint32_t value);
+  QkSwdStatus readCsr(uint16_t csr, uint32_t &value);
+  QkSwdStatus writeCsr(uint16_t csr, uint32_t value);
 
   /**
     * Read / write memory through the hart with a small PROGBUF program.
@@ -164,27 +172,27 @@ public:
     * DATA1, the RISC-V load or store is copied into PROGBUF, COMMAND starts it,
     * ABSTRACTCS says when it finished and DATA0 carries the value back.
     */
-  qkSwdStatus readMemory(uint32_t address, uint32_t &value, qkSwdWidth width = qkSwdWidth::Word);
-  qkSwdStatus writeMemory(uint32_t address, uint32_t value, qkSwdWidth width = qkSwdWidth::Word);
+  QkSwdStatus readMemory(uint32_t address, uint32_t &value, QkSwdWidth width = QkSwdWidth::Word);
+  QkSwdStatus writeMemory(uint32_t address, uint32_t value, QkSwdWidth width = QkSwdWidth::Word);
 
   /**
     * Burst variants. words is in/out and reports how much was actually moved,
     * which matters when the target stops answering half way through. Both need
     * the auto increment bit in ABSTRACTAUTO and use continue frames.
     */
-  qkSwdStatus readMemoryBlock(uint32_t address, uint32_t *buffer, uint16_t &words);
-  qkSwdStatus writeMemoryBlock(uint32_t address, const uint32_t *buffer, uint16_t &words);
+  QkSwdStatus readMemoryBlock(uint32_t address, uint32_t *buffer, uint16_t &words);
+  QkSwdStatus writeMemoryBlock(uint32_t address, const uint32_t *buffer, uint16_t &words);
 
 private:
-  static const uint32_t *readProgram(qkSwdWidth width);
-  static const uint32_t *writeProgram(qkSwdWidth width);
+  static const uint32_t *readProgram(QkSwdWidth width);
+  static const uint32_t *writeProgram(QkSwdWidth width);
 
-  qkSwdStatus pollDmStatus(uint32_t mask, uint32_t value);
-  qkSwdStatus pollAbstract();
+  QkSwdStatus pollDmStatus(uint32_t mask, uint32_t value);
+  QkSwdStatus pollAbstract();
   void loadProgBuf(const uint32_t *program);
-  qkSwdStatus executeProgBuf();
-  qkSwdStatus readMemoryOnce(uint32_t address, uint32_t &value, qkSwdWidth width);
-  qkSwdStatus writeMemoryOnce(uint32_t address, uint32_t value, qkSwdWidth width);
+  QkSwdStatus executeProgBuf();
+  QkSwdStatus readMemoryOnce(uint32_t address, uint32_t &value, QkSwdWidth width);
+  QkSwdStatus writeMemoryOnce(uint32_t address, uint32_t value, QkSwdWidth width);
 };
 
 /* The implementation follows; it is a separate file only to keep the class

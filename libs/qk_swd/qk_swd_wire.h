@@ -12,21 +12,21 @@
  *
  * The layering is:
  *
- *   qkSwdWire   the bit encoding, the register frames, the line reset: the
+ *   QkSwdWire   the bit encoding, the register frames, the line reset: the
  *               CRTP base. Everything that happens between two edges.
  *   Port line   the five wire calls of one pin, mixed into the wire by
- *               deriving from qkSwdWire<PortLine>.
- *   qkSwd       what the frames mean: debug module registers, hart control,
+ *               deriving from QkSwdWire<PortLine>.
+ *   QkSwd       what the frames mean: debug module registers, hart control,
  *               abstract commands, memory access (see qk_swd.h).
  *
  * THE LINE IS PART OF THE WIRE
  * ----------------------------
  * The protocol is templated on the port that drives it (CRTP): the port derives
- * from qkSwdWire<Port>, implements the five line calls, and inherits the frame
+ * from QkSwdWire<Port>, implements the five line calls, and inherits the frame
  * and bit machinery. There is no line object, no base interface and no member
  * to keep alive - the line *is* the wire, seen from the pin.
  *
- *     struct MyLine : qkSwdWire<MyLine>
+ *     struct MyLine : QkSwdWire<MyLine>
  *     {
  *       void driveLow();           // pin low, push pull
  *       void driveHigh();          // pin high, push pull
@@ -36,19 +36,19 @@
  *     };
  *
  *     MyLine line;              // line.write(), line.read(), line.reset() too
- *     qkSwd<MyLine> debugger;   // or qkSwd<MyLine> debugger(someLine);
+ *     QkSwd<MyLine> debugger;   // or QkSwd<MyLine> debugger(someLine);
  *
- * Each of the five is reached through one static_cast (qkSwdWire::lineDriveLow
+ * Each of the five is reached through one static_cast (QkSwdWire::lineDriveLow
  * and friends), so the hop is resolved at compile time and disappears. A frame
  * is 41 timed phases and an indirect call is a visible slice of a 250 ns
  * budget, spent inside the timed section, because the wait only starts once the
  * call has landed.
  *
- * The debug module layer follows the same rule: qkSwd<Port> derives from Port,
+ * The debug module layer follows the same rule: QkSwd<Port> derives from Port,
  * so the whole stack - pin, frames, debug module - is one object (see qk_swd.h).
  *
  * The trade is that the five names are only checked where they are used: a
- * missing one is a compile error inside qkSwdWire naming the call.
+ * missing one is a compile error inside QkSwdWire naming the call.
  *
  * WIRE FORMAT
  * -----------
@@ -113,7 +113,7 @@
  *   * there is no acknowledge. A write is fire and forget, a read always
  *     returns 32 bits. A dead or unpowered target shows up as all ones, so the
  *     only way to tell "answered" from "floating high" is a register with a
- *     value you already know (the capability register, see qkSwd::probe).
+ *     value you already know (the capability register, see QkSwd::probe).
  ******************************************************************************
  */
 
@@ -128,7 +128,7 @@
  * See the timing table in the file header for what each phase means and which
  * way it may be relaxed.
  */
-struct qkSwdTiming
+struct QkSwdTiming
 {
   uint32_t data1LowNs = 250;      /**< low phase of a 1 bit */
   uint32_t data1HighNs = 250;     /**< high phase that closes a 1 bit */
@@ -142,12 +142,12 @@ struct qkSwdTiming
   uint32_t settleNs = 5000000;    /**< idle high after the wake pulse */
 
   /** The reference programmer's 2x mode, the default a target expects. */
-  static qkSwdTiming medium() { return qkSwdTiming{}; }
+  static QkSwdTiming medium() { return QkSwdTiming{}; }
 
   /** The reference programmer's 1x mode; short wires and a fast host only. */
-  static qkSwdTiming fast()
+  static QkSwdTiming fast()
   {
-    qkSwdTiming timing = medium();
+    QkSwdTiming timing = medium();
     timing.data1LowNs = 165;
     timing.data1HighNs = 165;
     timing.data0LowNs = 490;
@@ -162,12 +162,12 @@ struct qkSwdTiming
   }
 };
 
-namespace qkSwdDetail
+namespace QkSwdDetail
 {
   constexpr uint8_t DirectionWrite = 0x01U; /**< address byte bit 0: master writes */
   constexpr uint8_t AddressBits = 8;
   constexpr uint8_t DataBits = 32;
-} // namespace qkSwdDetail
+} // namespace QkSwdDetail
 
 /**
  * Bit and frame level of the protocol, as a CRTP base for the port.
@@ -177,12 +177,12 @@ namespace qkSwdDetail
  * inheritance, so a derived object can send frames as well as drive its pin.
  */
 template <typename Derived>
-class qkSwdWire
+class QkSwdWire
 {
 public:
-  /** Replaces every phase duration; see qkSwdTiming. */
-  void setTiming(const qkSwdTiming &timing) { timing_ = timing; }
-  const qkSwdTiming &timing() const { return timing_; }
+  /** Replaces every phase duration; see QkSwdTiming. */
+  void setTiming(const QkSwdTiming &timing) { timing_ = timing; }
+  const QkSwdTiming &timing() const { return timing_; }
 
   /** Gap filler for callers that have a non-frame pause to fill. */
   void pauseNs(uint32_t nanoseconds) { lineWaitNs(nanoseconds); }
@@ -194,8 +194,8 @@ public:
   {
     sendStartBit(true);
 
-    uint8_t address = static_cast<uint8_t>((reg << 1) | qkSwdDetail::DirectionWrite);
-    for (uint8_t bit = 0; bit < qkSwdDetail::AddressBits; ++bit)
+    uint8_t address = static_cast<uint8_t>((reg << 1) | QkSwdDetail::DirectionWrite);
+    for (uint8_t bit = 0; bit < QkSwdDetail::AddressBits; ++bit)
     {
       sendBit((address & 0x80U) != 0U);
       address = static_cast<uint8_t>(address << 1);
@@ -211,7 +211,7 @@ public:
     sendStartBit(true);
 
     uint8_t address = static_cast<uint8_t>(reg << 1); // direction bit clear: a read
-    for (uint8_t bit = 0; bit < qkSwdDetail::AddressBits; ++bit)
+    for (uint8_t bit = 0; bit < QkSwdDetail::AddressBits; ++bit)
     {
       sendBit((address & 0x80U) != 0U);
       address = static_cast<uint8_t>(address << 1);
@@ -280,7 +280,7 @@ public:
   /** 32 bits, MSB first. */
   void sendWordBits(uint32_t value)
   {
-    for (uint8_t bit = 0; bit < qkSwdDetail::DataBits; ++bit)
+    for (uint8_t bit = 0; bit < QkSwdDetail::DataBits; ++bit)
     {
       sendBit((value & 0x80000000U) != 0U);
       value <<= 1;
@@ -292,7 +292,7 @@ public:
   {
     uint32_t value = 0;
 
-    for (uint8_t bit = 0; bit < qkSwdDetail::DataBits; ++bit)
+    for (uint8_t bit = 0; bit < QkSwdDetail::DataBits; ++bit)
     {
       value <<= 1;
 
@@ -337,7 +337,7 @@ protected:
   void lineWaitNs(uint32_t nanoseconds) { static_cast<Derived *>(this)->waitNs(nanoseconds); }
 
 private:
-  qkSwdTiming timing_ = qkSwdTiming::medium();
+  QkSwdTiming timing_ = QkSwdTiming::medium();
 };
 
 #endif // QK_SWD_WIRE_H
