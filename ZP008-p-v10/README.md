@@ -23,10 +23,10 @@ this tree:
 * `PY32F002B_Firmware/` (submodule) — CMSIS, the HAL sources, `SystemInit`, the
   `startup_py32f002bxx.s` startup file and the `py32f002bx5.ld` linker script
   (all from `Templates/PY32F002Bxx_Templates/` and `Drivers/`).
-* `../bitbang_interface` — the protocol engine behind
-  [`protocol.cpp`](../bitbang_interface/src/protocol.cpp), so the peripheral and
+* `../libs/bitbang_interface` — the protocol engine behind
+  [`protocol.cpp`](../libs/bitbang_interface/src/protocol.cpp), so the peripheral and
   the controller always share one definition of the frame format and the
-  register map (see [protocol.h](../bitbang_interface/src/protocol.h)).
+  register map (see [protocol.h](../libs/bitbang_interface/src/protocol.h)).
 
 The only duplicated-basename trap is `Templates/PY32F002Bxx_Templates/Src`,
 which holds its own `main.c`, `py32f002b_it.c` and `py32f002b_hal_msp.c`. That

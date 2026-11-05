@@ -24,7 +24,7 @@ OPT = -Og
 BUILD_DIR = build
 
 # Portable protocol engine shared with the controller side (protocol.cpp)
-BITBANG_DIR = ../bitbang_interface/src
+BITBANG_DIR = ../libs/bitbang_interface/src
 
 # CMSIS, HAL, startup, linker script and SystemInit come from the Puya
 # submodule inside this project instead of a local copy:
